@@ -7,6 +7,8 @@
 class mcE_TC32 : mcBoard {
 public:
     mcE_TC32(const char *address);
+    // add the another constructor...
+    mcE_TC32(const char *address, const char *boardName);
     int cbSetConfig(int InfoType, int DevNum, int ConfigItem, int ConfigVal);
     int cbDBitOut(int PortType, int BitNum, USHORT BitValue);
     int cbDIn(int PortType, USHORT *DataValue);

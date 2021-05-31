@@ -168,8 +168,10 @@ int cbCreateDaqDevice(int BoardNum, DaqDeviceDescriptor deviceDescriptor)
     if (strcmp(deviceDescriptor.ProductName, "E-TC") == 0) {
         pBoard = (mcBoard *)new mcE_TC(deviceDescriptor.Reserved);
     }
-    else if (strcmp(deviceDescriptor.ProductName, "E-TC32") == 0) {
-        pBoard = (mcBoard *)new mcE_TC32(deviceDescriptor.Reserved);
+    else if (strcmp(deviceDescriptor.ProductName, "TC-32") == 0) { // new firmware ProductName is TC-32, it returns that Unknown board type TC=32
+	    // mcE_TC32 has the hard-coded name, so pass ProductName into class...
+	    // 2021.05.30 Jeong Han Lee
+        pBoard = (mcBoard *)new mcE_TC32(deviceDescriptor.Reserved, deviceDescriptor.ProductName);
     }
     else if (strcmp(deviceDescriptor.ProductName, "E-1608") == 0) {
         pBoard = (mcBoard *)new mcE_1608(deviceDescriptor.Reserved);

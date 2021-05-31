@@ -78,7 +78,12 @@ int measCompCreateDevice(std::string uniqueId)
         printf("Error calling cbGetNetDeviceDescriptor=%d\n", status);
         return -1;
     }
-    devIndex = measCompNumDevices++;
+    printf("devIndex %d measCompNumDevice %d\n", devIndex, measCompNumDevices);
+    devIndex = measCompNumDevices; // Double count, only test one device
+    // if we have more than one, what we see?i
+    // However, I don't undestand this line, because we have the unique one device per a PORT with the unique_id (mac address)
+    // Why do we count double?
+    printf("devIndex %d measCompNumDevice %d\n", devIndex, measCompNumDevices);
   }
   else {
     // uniqueId was not an IP address so it must be a serial number (USB) or MAC address (Ethernet)

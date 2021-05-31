@@ -753,6 +753,15 @@ MultiFunction::MultiFunction(const char *portName, const char *uniqueID, int max
       digitalIOMask_[i] |= (1 << j);
     }
   }
+
+  printf("numAnalogIn_   %12d\n", numAnalogIn_);
+  printf("numAnalogOut_  %12d\n", numAnalogOut_);
+  printf("ADCResolution_ %12d\n", ADCResolution_);
+  printf("DACResolution_ %12d\n", DACResolution_);
+  printf("numIOPorts_    %12d\n", numIOPorts_);
+  printf("numTempChans_  %12d\n", numTempChans_);
+
+
   // Assume only voltage input is supported
   analogInTypeConfigurable_ = 0;
   switch (boardType_) {
@@ -1860,7 +1869,9 @@ void MultiFunction::pollerThread()
   /* This function runs in a separate thread.  It waits for the poll
    * time */
   static const char *functionName = "pollerThread";
-  epicsUInt32 newValue, changedBits, prevInput[MAX_IO_PORTS];
+  epicsUInt32 newValue =0;
+  epicsUInt32 changedBits =0;
+  epicsUInt32 prevInput[MAX_IO_PORTS] ={0};
   epicsUInt16 biVal16;
   epicsUInt32 biVal32;
   int i;
@@ -1877,14 +1888,16 @@ void MultiFunction::pollerThread()
     lock();
     epicsTimeGetCurrent(&startTime);
 
+    /*
     // Read the digital inputs
     for (i=0; i<numIOPorts_; i++) {
       if (numIOBits_[i] > 16) {
         status = cbDIn32(boardNum_, digitalIOPort_[i], &biVal32);
       } else {
         status = cbDIn(boardNum_, digitalIOPort_[i], &biVal16);
-        biVal32 = biVal16;
+        biVal32 = (epicsUInt32) biVal16;
       }
+      printf ("biVal32 %x status %d\n", biVal32, status);
       if (status) {
         if (!prevStatus) {
           asynPrint(pasynUserSelf, ASYN_TRACE_ERROR,
@@ -1895,6 +1908,8 @@ void MultiFunction::pollerThread()
       }
       newValue = biVal32;
       changedBits = newValue ^ prevInput[i];
+      // printf("numIOPorts_ %d, forceCalback_ %d newValue %d, prevInput %d, changeBits %d\n", numIOPorts_, forceCallback_, newValue, prevInput[i], changedBits);
+	      
       if (forceCallback_ || (changedBits != 0)) {
         prevInput[i] = newValue;
         forceCallback_ = 0;
@@ -1915,6 +1930,8 @@ void MultiFunction::pollerThread()
       }
       setIntegerParam(i, counterCounts_, countVal);
     }
+   
+    */
 
     if (numAnalogOut_ > 0) {
       // Poll the status of the waveform generator output
