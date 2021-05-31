@@ -753,14 +753,14 @@ MultiFunction::MultiFunction(const char *portName, const char *uniqueID, int max
       digitalIOMask_[i] |= (1 << j);
     }
   }
-
+/*
   printf("numAnalogIn_   %12d\n", numAnalogIn_);
   printf("numAnalogOut_  %12d\n", numAnalogOut_);
   printf("ADCResolution_ %12d\n", ADCResolution_);
   printf("DACResolution_ %12d\n", DACResolution_);
   printf("numIOPorts_    %12d\n", numIOPorts_);
   printf("numTempChans_  %12d\n", numTempChans_);
-
+*/
 
   // Assume only voltage input is supported
   analogInTypeConfigurable_ = 0;
