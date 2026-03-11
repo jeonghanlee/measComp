@@ -1,21 +1,21 @@
+
+
 <!DOCTYPE html>
-<html class="writer-html5" lang="en" >
+<html class="writer-html5" lang="en" data-content_root="./">
 <head>
-  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.18.1: http://docutils.sourceforge.net/" />
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>measComp: EPICS Drivers for Measurement Computing Devices &mdash; EPICS support for Measurement Computing devices</title>
-      <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-      <link rel="stylesheet" href="_static/css/my_theme.css" type="text/css" />
-  <!--[if lt IE 9]>
-    <script src="_static/js/html5shiv.min.js"></script>
-  <![endif]-->
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=fa44fd50" />
+      <link rel="stylesheet" type="text/css" href="_static/css/my_theme.css?v=254ed751" />
+
   
-        <script src="_static/jquery.js"></script>
-        <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
-        <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
-        <script src="_static/doctools.js"></script>
-        <script src="_static/sphinx_highlight.js"></script>
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
     <script src="_static/js/theme.js"></script>
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
@@ -72,7 +72,7 @@
            <div itemprop="articleBody">
              
   <section id="meascomp-epics-drivers-for-measurement-computing-devices">
-<h1>measComp: EPICS Drivers for Measurement Computing Devices<a class="headerlink" href="#meascomp-epics-drivers-for-measurement-computing-devices" title="Permalink to this heading"></a></h1>
+<h1>measComp: EPICS Drivers for Measurement Computing Devices<a class="headerlink" href="#meascomp-epics-drivers-for-measurement-computing-devices" title="Link to this heading"></a></h1>
 <dl class="field-list simple">
 <dt class="field-odd">author<span class="colon">:</span></dt>
 <dd class="field-odd"><p>Mark Rivers, University of Chicago</p>
@@ -83,7 +83,7 @@ I/O modules from Measurement Computing.</p>
 <p>The software is located in the
 <a class="reference external" href="https://github.com/epics-modules/measComp">measComp github repository</a>.</p>
 <section id="required-modules">
-<h2>Required Modules<a class="headerlink" href="#required-modules" title="Permalink to this heading"></a></h2>
+<h2>Required Modules<a class="headerlink" href="#required-modules" title="Link to this heading"></a></h2>
 <table class="docutils align-default">
 <thead>
 <tr class="row-odd"><th class="head"><p>Required module</p></th>
@@ -120,7 +120,7 @@ release of measComp can be determined from the
 measComp/configure/RELEASE file.</p>
 </section>
 <section id="table-of-contents">
-<h2>Table of Contents<a class="headerlink" href="#table-of-contents" title="Permalink to this heading"></a></h2>
+<h2>Table of Contents<a class="headerlink" href="#table-of-contents" title="Link to this heading"></a></h2>
 <div class="toctree-wrapper compound">
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="overview.html">Overview</a></li>
@@ -131,15 +131,18 @@ measComp/configure/RELEASE file.</p>
 <li class="toctree-l3"><a class="reference internal" href="measCompMultiFunctionDoc.html#e-tc">E-TC</a></li>
 <li class="toctree-l3"><a class="reference internal" href="measCompMultiFunctionDoc.html#tc-32">TC-32</a></li>
 <li class="toctree-l3"><a class="reference internal" href="measCompMultiFunctionDoc.html#usb-1608g-and-usb-1608gx-2ao">USB-1608G and USB-1608GX-2AO</a></li>
+<li class="toctree-l3"><a class="reference internal" href="measCompMultiFunctionDoc.html#usb-1808-and-usb-1808x">USB-1808 and USB-1808X</a></li>
 <li class="toctree-l3"><a class="reference internal" href="measCompMultiFunctionDoc.html#usb-2408-2ao">USB-2408-2AO</a></li>
 <li class="toctree-l3"><a class="reference internal" href="measCompMultiFunctionDoc.html#usb-temp-and-usb-temp-ai">USB-TEMP and USB-TEMP-AI</a></li>
 <li class="toctree-l3"><a class="reference internal" href="measCompMultiFunctionDoc.html#usb-1208ls">USB-1208LS</a></li>
 <li class="toctree-l3"><a class="reference internal" href="measCompMultiFunctionDoc.html#e-dio24">E-DIO24</a></li>
+<li class="toctree-l3"><a class="reference internal" href="measCompMultiFunctionDoc.html#usb-erb24">USB-ERB24</a></li>
 <li class="toctree-l3"><a class="reference internal" href="measCompMultiFunctionDoc.html#usb-3100">USB-3100</a></li>
 </ul>
 </li>
 <li class="toctree-l2"><a class="reference internal" href="measCompMultiFunctionDoc.html#configuration">Configuration</a></li>
 <li class="toctree-l2"><a class="reference internal" href="measCompMultiFunctionDoc.html#databases">Databases</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="measCompMultiFunctionDoc.html#overall-device-functions">Overall Device Functions</a></li>
 <li class="toctree-l3"><a class="reference internal" href="measCompMultiFunctionDoc.html#analog-i-o-functions">Analog I/O Functions</a></li>
 <li class="toctree-l3"><a class="reference internal" href="measCompMultiFunctionDoc.html#temperature-functions">Temperature Functions</a></li>
 <li class="toctree-l3"><a class="reference internal" href="measCompMultiFunctionDoc.html#digital-i-o-functions">Digital I/O Functions</a></li>
@@ -149,11 +152,8 @@ measComp/configure/RELEASE file.</p>
 <li class="toctree-l3"><a class="reference internal" href="measCompMultiFunctionDoc.html#trigger-functions">Trigger Functions</a></li>
 </ul>
 </li>
+<li class="toctree-l2"><a class="reference internal" href="measCompMultiFunctionDoc.html#box-for-usb-ctr08-usb-3104-and-usb-1808x">Box for USB-CTR08, USB-3104, and USB-1808X</a></li>
 <li class="toctree-l2"><a class="reference internal" href="measCompMultiFunctionDoc.html#box-for-usb-2408-2ao">Box for USB-2408-2AO</a></li>
-<li class="toctree-l2"><a class="reference internal" href="measCompMultiFunctionDoc.html#wiring-usb-1608gx-2ao-to-bcda-bc-020">Wiring USB-1608GX-2AO to BCDA BC-020</a><ul>
-<li class="toctree-l3"><a class="reference internal" href="measCompMultiFunctionDoc.html#usb-1608gx-2ao-wiring-to-two-bcda-bc-020-lemo-breakout-panels">USB-1608GX-2AO Wiring to Two BCDA BC-020 LEMO Breakout Panels</a></li>
-</ul>
-</li>
 <li class="toctree-l2"><a class="reference internal" href="measCompMultiFunctionDoc.html#performance-measurements">Performance measurements</a></li>
 </ul>
 </li>
@@ -163,15 +163,16 @@ measComp/configure/RELEASE file.</p>
 <li class="toctree-l2"><a class="reference internal" href="measCompUSBCTRDoc.html#databases">Databases</a><ul>
 <li class="toctree-l3"><a class="reference internal" href="measCompUSBCTRDoc.html#digital-i-o-functions">Digital I/O Functions</a></li>
 <li class="toctree-l3"><a class="reference internal" href="measCompUSBCTRDoc.html#pulse-generator-functions">Pulse Generator Functions</a></li>
-<li class="toctree-l3"><a class="reference internal" href="measCompUSBCTRDoc.html#scaler-record-support">Scaler Record Support</a></li>
-<li class="toctree-l3"><a class="reference internal" href="measCompUSBCTRDoc.html#multi-channel-scaler-mcs-support">Multi-Channel Scaler (MCS) Support</a></li>
-<li class="toctree-l3"><a class="reference internal" href="measCompUSBCTRDoc.html#medm-screens">medm screens</a></li>
 </ul>
 </li>
-<li class="toctree-l2"><a class="reference internal" href="measCompUSBCTRDoc.html#wiring-to-bcda-bc-020-lemo-breakout-panels">Wiring to BCDA BC-020 LEMO Breakout Panels</a><ul>
-<li class="toctree-l3"><a class="reference internal" href="measCompUSBCTRDoc.html#wiring-table">Wiring table</a></li>
+<li class="toctree-l2"><a class="reference internal" href="measCompUSBCTRDoc.html#scaler-record-support">Scaler Record Support</a></li>
+<li class="toctree-l2"><a class="reference internal" href="measCompUSBCTRDoc.html#multi-channel-scaler-mcs-support">Multi-Channel Scaler (MCS) Support</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="measCompUSBCTRDoc.html#notes-on-external-channel-advance">Notes on external channel advance</a></li>
 </ul>
 </li>
+<li class="toctree-l2"><a class="reference internal" href="measCompUSBCTRDoc.html#using-an-external-gate-signal">Using an external gate signal</a></li>
+<li class="toctree-l2"><a class="reference internal" href="measCompUSBCTRDoc.html#packaging">Packaging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="measCompUSBCTRDoc.html#medm-screens">medm screens</a></li>
 <li class="toctree-l2"><a class="reference internal" href="measCompUSBCTRDoc.html#performance-measurements">Performance measurements</a></li>
 <li class="toctree-l2"><a class="reference internal" href="measCompUSBCTRDoc.html#restrictions">Restrictions</a></li>
 </ul>
@@ -192,7 +193,7 @@ measComp/configure/RELEASE file.</p>
 
   <div role="contentinfo">
     <p>&#169; Copyright 2023, Mark Rivers.
-      <span class="lastupdated">Last updated on 2023-June-14.
+      <span class="lastupdated">Last updated on 2026-March-11.
       </span></p>
   </div>
 
