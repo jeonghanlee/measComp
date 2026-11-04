@@ -10,6 +10,9 @@
 #endif
 
 #include <epicsExport.h>
+#include <epicsGuard.h>
+#include <epicsMutex.h>
+#include <epicsStdio.h>
 #include <measCompDiscover.h>
 
 #define MAX_DEVICES 100
@@ -20,9 +23,11 @@
 static DaqDeviceDescriptor measCompInventory[MAX_DEVICES];
 static int measCompNumDevices = 0;
 bool measCompInventoryInitialized = false;
+static epicsMutex inventoryMutex;
 
 int measCompDiscoverDevices()
 {
+  epicsGuard<epicsMutex> guard(inventoryMutex);
   int numDevices = MAX_DEVICES;
   int status;
 
@@ -30,6 +35,7 @@ int measCompDiscoverDevices()
   #ifdef WIN32
     cbIgnoreInstaCal();
     status = cbGetDaqDeviceInventory(ANY_IFC, measCompInventory, &numDevices);
+    if (status) return status;
     // Windows eliminates leading zeros on USB device serial numbers, Linux does not.
     // Add the leading zero if the string length is 7
     for (int i=0; i<numDevices; i++) {
@@ -42,6 +48,7 @@ int measCompDiscoverDevices()
     } 
   #else
     status = ulGetDaqDeviceInventory(ANY_IFC, measCompInventory, (unsigned int *)&numDevices);
+    if (status) return status;
     // Copy the IP address to the reserved field for Ethernet devices.
     for (int i=0; i<numDevices; i++) {
         if (measCompInventory[i].devInterface == ETHERNET_IFC) {
@@ -63,6 +70,7 @@ int measCompDiscoverDevices()
 
 void measCompShowDevices()
 {
+  epicsGuard<epicsMutex> guard(inventoryMutex);
   measCompDiscoverDevices();
   printf("measCompShowDevices, numDevices=%d\n", measCompNumDevices);
   #ifdef WIN32
@@ -104,6 +112,7 @@ void measCompShowDevices()
   */
 int measCompCreateDevice(std::string uniqueId, DaqDeviceDescriptor& deviceDescriptor, long long *handle)
 {
+  epicsGuard<epicsMutex> guard(inventoryMutex);
   size_t colon;
   std::string host = uniqueId;
   std::string port;
@@ -116,7 +125,9 @@ int measCompCreateDevice(std::string uniqueId, DaqDeviceDescriptor& deviceDescri
   char ipAddrAsString[25];
   double timeout = 1.0;
 
-  measCompDiscoverDevices();
+  *handle = 0;
+  status = measCompDiscoverDevices();
+  if (status) return status;
   // If the uniqueId is a hex number it is USB, else Ethernet
   strtol(uniqueId.c_str(), &endptr, 16);
   if (*endptr != '\0') isEthernet = true;
@@ -152,18 +163,27 @@ int measCompCreateDevice(std::string uniqueId, DaqDeviceDescriptor& deviceDescri
     }
     // We did not find this device on the local subnet, create a new one
     if (devIndex == -1) {
-      devIndex = measCompNumDevices++;
+      if (measCompNumDevices >= MAX_DEVICES) {
+        printf("Device inventory is full\n");
+        return -1;
+      }
+      DaqDeviceDescriptor descriptor = {};
       #ifdef WIN32
         status = cbGetNetDeviceDescriptor((char*)host.c_str(), portNum,
-                                          &measCompInventory[devIndex], (int) (timeout * 1000));
+                                          &descriptor, (int) (timeout * 1000));
       #else
         status = ulGetNetDaqDeviceDescriptor((char*)host.c_str(), portNum, NULL,
-                                             &measCompInventory[devIndex], timeout);
+                                             &descriptor, timeout);
       #endif
       if (status) {
           printf("Error calling cbGetNetDeviceDescriptor=%d\n", status);
           return -1;
       }
+      #ifndef WIN32
+        epicsSnprintf(descriptor.reserved, sizeof(descriptor.reserved), "%s", host.c_str());
+      #endif
+      devIndex = measCompNumDevices++;
+      measCompInventory[devIndex] = descriptor;
     }
   }
   else {
@@ -194,12 +214,13 @@ int measCompCreateDevice(std::string uniqueId, DaqDeviceDescriptor& deviceDescri
         printf("Error calling ulCreateDaqDevice devIndex=%d\n", devIndex);
         return -1;
       }
-      *handle = devHandle;
       UlError error = ulConnectDaqDevice(devHandle);
       if (error) {
         printf("Error calling ulConnectDaqDevice error=%d\n", error);
+        ulReleaseDaqDevice(devHandle);
         return -1;
       }
+      *handle = devHandle;
     #endif
     //
     deviceDescriptor = measCompInventory[devIndex];

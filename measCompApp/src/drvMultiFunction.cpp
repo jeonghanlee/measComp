@@ -18,10 +18,12 @@
 #include <iocsh.h>
 #include <epicsThread.h>
 #include <epicsString.h>
+#include <epicsMath.h>
 
 #include <asynPortDriver.h>
 
 #define DRIVER_VERSION "4.4"
+#define RECONNECT_DELAY 5.0
 
 #ifdef _WIN32
   #include "cbw.h"
@@ -601,6 +603,8 @@ public:
   MultiFunction(const char *portName, const char *uniqueID, int maxInputPoints, int maxOutputPoints);
 
   /* These are the methods that we override from asynPortDriver */
+  virtual asynStatus connect(asynUser *pasynUser);
+  virtual asynStatus disconnect(asynUser *pasynUser);
   virtual asynStatus writeInt32(asynUser *pasynUser, epicsInt32 value);
   virtual asynStatus getBounds(asynUser *pasynUser, epicsInt32 *low, epicsInt32 *high);
   virtual asynStatus writeFloat64(asynUser *pasynUser, epicsFloat64 value);
@@ -724,6 +728,18 @@ protected:
   int digitalOutput_;
 
 private:
+  std::string deviceID_;
+  asynUser *portUser_;
+  bool initialized_;
+  bool connected_;
+  epicsUInt64 lastConnectAttempt_;
+  int savedTCType_[MAX_SIGNALS];
+  int savedOpenDetect_[MAX_SIGNALS];
+  int initializeDevice();
+  int restoreTemperatureConfig();
+  void setInputStatus(asynStatus status);
+  void notifyConnection(bool connected);
+  bool isConnectionError(int status);
   #ifdef _WIN32
     int boardNum_;
   #else
@@ -818,7 +834,7 @@ MultiFunction::MultiFunction(const char *portName, const char *uniqueID, int max
                               asynFloat64Mask | asynFloat64ArrayMask | asynOctetMask        | asynEnumMask | asynDrvUserMask,
       asynUInt32DigitalMask | asynInt32Mask   | asynInt32ArrayMask   | asynFloat32ArrayMask | 
                               asynFloat64Mask | asynFloat64ArrayMask | asynOctetMask        | asynEnumMask,
-      ASYN_MULTIDEVICE | ASYN_CANBLOCK, 1, /* ASYN_CANBLOCK=1, ASYN_MULTIDEVICE=1, autoConnect=1 */
+      ASYN_MULTIDEVICE | ASYN_CANBLOCK, 0, /* Enable auto-connect after parameter initialization. */
       0, 0),  /* Default priority and stack size */
     maxInputPoints_(maxInputPoints),
     maxOutputPoints_(maxOutputPoints),
@@ -827,28 +843,32 @@ MultiFunction::MultiFunction(const char *portName, const char *uniqueID, int max
     waveGenRunning_(0),
     waveDigRunning_(0)
 {
-  int i, j;
-  int status;
-  long long handle;
-  static const char *functionName = "MultiFunction";
+  int i;
 
+  deviceID_ = uniqueID;
+  portUser_ = pasynManager->createAsynUser(0, 0);
+  pasynManager->connectDevice(portUser_, portName, -1);
+  initialized_ = false;
+  connected_ = false;
+  lastConnectAttempt_ = 0;
+  boardType_ = boardFamily_ = 0;
+  boardName_[0] = '\0';
+  pBoardEnums_ = 0;
+  numAnalogIn_ = numAnalogOut_ = numTemperatureIn_ = numVoltageIn_ = 0;
+  numIOPorts_ = numTimers_ = numCounters_ = 0;
+  ADCResolution_ = DACResolution_ = 0;
+  analogInTypeConfigurable_ = analogInDataRateConfigurable_ = analogOutRangeConfigurable_ = 0;
+  #ifdef _WIN32
+    boardNum_ = -1;
+  #else
+    daqDeviceHandle_ = 0;
+  #endif
   for (i=0; i<MAX_PULSE_GEN; i++) pulseGenRunning_[i]=0;
   for (i=0; i<MAX_IO_PORTS; i++) forceCallback_[i] = 1;
-
-  status = measCompCreateDevice(uniqueID, daqDeviceDescriptor_, &handle);
-  if (status) {
-    printf("Error creating device with measCompCreateDevice\n");
-    return;
+  for (i=0; i<MAX_SIGNALS; i++) {
+    savedTCType_[i] = -1;
+    savedOpenDetect_[i] = -1;
   }
-  #ifdef _WIN32
-    boardNum_ = (int) handle;
-    strcpy(boardName_, daqDeviceDescriptor_.ProductName);
-    boardType_ = daqDeviceDescriptor_.ProductID;
-  #else
-    daqDeviceHandle_ = handle;
-    strcpy(boardName_, daqDeviceDescriptor_.productName);
-    boardType_ = daqDeviceDescriptor_.productId;
-  #endif
 
   // Model parameters
   createParam(modelNameString,                 asynParamOctet,  &modelName_);
@@ -959,6 +979,67 @@ MultiFunction::MultiFunction(const char *portName, const char *uniqueID, int max
   createParam(digitalInputString,      asynParamUInt32Digital, &digitalInput_);
   createParam(digitalOutputString,     asynParamUInt32Digital, &digitalOutput_);
 
+  // Set values of some parameters that need to be set because init record order is not predictable
+  // or because the corresponding records are PINI=NO.
+  setIntegerParam(waveGenUserNumPoints_, 1);
+  setIntegerParam(waveGenIntNumPoints_, 1);
+  setIntegerParam(waveDigNumPoints_, 1);
+  setIntegerParam(pulseGenRun_, 0);
+  setIntegerParam(waveDigRun_, 0);
+  setIntegerParam(waveGenRun_, 0);
+  setDoubleParam(pollSleepMS_, 50.);
+  #ifdef linux
+  aiInputMode_ = AI_SINGLE_ENDED;
+  #endif
+  for (i=0; i<MAX_SIGNALS; i++) {
+    setIntegerParam(i, thermocoupleType_, TC_TYPE_J);
+    setIntegerParam(i, temperatureScale_, CELSIUS);
+    setIntegerParam(i, temperatureFilter_, 0);
+    setIntegerParam(i, thermocoupleOpenDetect_, 0);
+    setDoubleParam(i, temperatureInValue_, epicsNAN);
+    setDoubleParam(i, voltageInValue_, epicsNAN);
+    setIntegerParam(i, analogInValue_, 0);
+    setIntegerParam(i, counterCounts_, 0);
+    setUIntDigitalParam(i, digitalInput_, 0, 0xFFFFFFFF);
+  }
+  setStringParam(uniqueID_, deviceID_.c_str());
+  setStringParam(driverVersion_, DRIVER_VERSION);
+  setStringParam(lastErrorMessage_, "Device is not connected");
+  setInputStatus(asynDisconnected);
+  pasynManager->autoConnect(portUser_, 1);
+  lock();
+  connect(portUser_);
+  unlock();
+
+  /* Start the thread to poll counters and digital inputs and do callbacks to
+   * device support */
+  epicsThreadCreate("MultiFunctionPoller",
+                    epicsThreadPriorityLow,
+                    epicsThreadGetStackSize(epicsThreadStackMedium),
+                    (EPICSTHREADFUNC)pollerThreadC,
+                    this);
+}
+
+int MultiFunction::initializeDevice()
+{
+  int i, j, status;
+  long long handle;
+  static const char *functionName = "initializeDevice";
+  status = measCompCreateDevice(deviceID_, daqDeviceDescriptor_, &handle);
+  if (status) {
+    printf("Error creating device with measCompCreateDevice\n");
+    return -1;
+  }
+  #ifdef _WIN32
+    boardNum_ = (int) handle;
+    strcpy(boardName_, daqDeviceDescriptor_.ProductName);
+    boardType_ = daqDeviceDescriptor_.ProductID;
+  #else
+    daqDeviceHandle_ = handle;
+    strcpy(boardName_, daqDeviceDescriptor_.productName);
+    boardType_ = daqDeviceDescriptor_.productId;
+  #endif
+
   // Map very similar boards for simplicity
   boardFamily_ = boardType_;
   switch (boardType_) {
@@ -996,9 +1077,9 @@ MultiFunction::MultiFunction(const char *portName, const char *uniqueID, int max
       break;
   }
 
-  char uniqueIDStr[256];
-  char firmwareVersion[256];
-  char ULVersion[256];
+  char uniqueIDStr[256] = "";
+  char firmwareVersion[256] = "";
+  char ULVersion[256] = "";
   ULMutex.lock();
   #ifdef _WIN32
     int size = sizeof(uniqueIDStr);
@@ -1009,7 +1090,7 @@ MultiFunction::MultiFunction(const char *portName, const char *uniqueID, int max
     cbGetRevision(&DLLRevNum, &VXDRevNum);
     sprintf(ULVersion, "%f %f", DLLRevNum, VXDRevNum);
   #else
-    strcpy(uniqueIDStr, uniqueID);
+    epicsSnprintf(uniqueIDStr, sizeof(uniqueIDStr), "%s", deviceID_.c_str());
     unsigned int size = sizeof(firmwareVersion);
     ulDevGetConfigStr(daqDeviceHandle_, ::DEV_CFG_VER_STR, DEV_VER_FW_MAIN, firmwareVersion, &size);
     size = sizeof(ULVersion);
@@ -1031,7 +1112,7 @@ MultiFunction::MultiFunction(const char *portName, const char *uniqueID, int max
     cbGetConfig(BOARDINFO, boardNum_, 0, BIDINUMDEVS,     &numIOPorts_);
     cbGetConfig(BOARDINFO, boardNum_, 0, BINUMTEMPCHANS,  &numTemperatureIn_);
   #else
-    long long infoValue;
+    long long infoValue = 0;
     status = ulAIGetInfo(daqDeviceHandle_, AI_INFO_NUM_CHANS_BY_TYPE, AI_VOLTAGE, &infoValue);
     if (status)
       numAnalogIn_ = 0;
@@ -1049,13 +1130,17 @@ MultiFunction::MultiFunction(const char *portName, const char *uniqueID, int max
     status = ulDIOGetInfo(daqDeviceHandle_, DIO_INFO_NUM_PORTS, 0, &infoValue);
     numIOPorts_ = infoValue;
     status = ulAIGetInfo(daqDeviceHandle_, AI_INFO_NUM_CHANS_BY_TYPE, AI_TC, &infoValue);
-    numTemperatureIn_ = infoValue;
+    numTemperatureIn_ = status ? 0 : infoValue;
     // uldaq reports the TC-32 thermocouple channel count including the EXP-32
     // expansion channels. Without the expansion only the first half of the
     // channels exist, so limit the count to the base unit channels.
     if (boardFamily_ == USB_TC32) {
       status = ulDevGetConfig(daqDeviceHandle_, ::DEV_CFG_HAS_EXP, 0, &infoValue);
-      if ((status == ERR_NO_ERROR) && (infoValue == 0)) numTemperatureIn_ /= 2;
+      if (status != ERR_NO_ERROR) {
+        ULMutex.unlock();
+        return status;
+      }
+      if (infoValue == 0) numTemperatureIn_ /= 2;
     }
   #endif
   if (numIOPorts_ > MAX_IO_PORTS) numIOPorts_ = MAX_IO_PORTS;
@@ -1266,40 +1351,148 @@ MultiFunction::MultiFunction(const char *portName, const char *uniqueID, int max
   waveGenIntTimeBuffer_  = (epicsFloat32 *) calloc(maxOutputPoints_, sizeof(epicsFloat32));
   waveDigTimeBuffer_     = (epicsFloat32 *) calloc(maxInputPoints_,  sizeof(epicsFloat32));
   waveDigAbsTimeBuffer_  = (epicsFloat64 *) calloc(maxInputPoints_,  sizeof(epicsFloat64));
-  pInBuffer_ = (epicsFloat64 *) calloc(maxInputPoints  * numAnalogIn_, sizeof(epicsFloat64));
+  pInBuffer_ = (epicsFloat64 *) calloc(maxInputPoints_ * numAnalogIn_, sizeof(epicsFloat64));
   #ifdef _WIN32
-    waveGenOutBuffer_ = (epicsUInt16 *) calloc(maxOutputPoints * numAnalogOut_, sizeof(epicsUInt16));
+    waveGenOutBuffer_ = (epicsUInt16 *) calloc(maxOutputPoints_ * numAnalogOut_, sizeof(epicsUInt16));
   #else
-    waveGenOutBuffer_ = (epicsFloat64 *) calloc(maxOutputPoints * numAnalogOut_, sizeof(epicsFloat64));
+    waveGenOutBuffer_ = (epicsFloat64 *) calloc(maxOutputPoints_ * numAnalogOut_, sizeof(epicsFloat64));
   #endif
 
-  // Set values of some parameters that need to be set because init record order is not predictable
-  // or because the corresponding records are PINI=NO.
-  setIntegerParam(waveGenUserNumPoints_, 1);
-  setIntegerParam(waveGenIntNumPoints_, 1);
-  setIntegerParam(waveDigNumPoints_, 1);
-  setIntegerParam(pulseGenRun_, 0);
-  setIntegerParam(waveDigRun_, 0);
-  setIntegerParam(waveGenRun_, 0);
-  setDoubleParam(pollSleepMS_, 50.);
-  #ifdef linux
-  aiInputMode_ = AI_SINGLE_ENDED;
-  #endif
-  for (i=0; i<numTemperatureIn_; i++) {
-    setIntegerParam(i, thermocoupleType_, TC_TYPE_J);
-  }
   // Set the analog output range to the first supported value for this model
   for (i=0; i<MAX_ANALOG_OUT; i++) {
     setIntegerParam(i, analogOutRange_, pBoardEnums_->pOutputRange[0].enumValue);
   }
 
-  /* Start the thread to poll counters and digital inputs and do callbacks to
-   * device support */
-  epicsThreadCreate("MultiFunctionPoller",
-                    epicsThreadPriorityLow,
-                    epicsThreadGetStackSize(epicsThreadStackMedium),
-                    (EPICSTHREADFUNC)pollerThreadC,
-                    this);
+  return 0;
+}
+
+void MultiFunction::setInputStatus(asynStatus status)
+{
+  const int parameters[] = {temperatureInValue_, voltageInValue_, analogInValue_,
+                            digitalInput_, counterCounts_};
+  for (int addr=0; addr<MAX_SIGNALS; addr++) {
+    for (size_t p=0; p<sizeof(parameters)/sizeof(parameters[0]); p++)
+      setParamStatus(addr, parameters[p], status);
+  }
+}
+
+void MultiFunction::notifyConnection(bool connected)
+{
+  asynUser *user = pasynManager->createAsynUser(0, 0);
+  for (int addr=-1; addr<MAX_SIGNALS; addr++) {
+    if (pasynManager->connectDevice(user, portName, addr) == asynSuccess) {
+      int wasConnected;
+      pasynManager->isConnected(user, &wasConnected);
+      if (connected && !wasConnected) pasynManager->exceptionConnect(user);
+      if (!connected && wasConnected) pasynManager->exceptionDisconnect(user);
+      pasynManager->disconnect(user);
+    }
+  }
+  pasynManager->freeAsynUser(user);
+}
+
+int MultiFunction::restoreTemperatureConfig()
+{
+  for (int addr=0; addr<numTemperatureIn_; addr++) {
+    int status = 0;
+    if (savedTCType_[addr] >= 0) {
+      if (boardFamily_ == USB_TC32) epicsThreadSleep(0.01);
+      #ifdef _WIN32
+        status = cbSetConfig(BOARDINFO, boardNum_, addr, BICHANTCTYPE, savedTCType_[addr]);
+      #else
+        status = ulAISetConfig(daqDeviceHandle_, AI_CFG_CHAN_TC_TYPE, addr, savedTCType_[addr]);
+      #endif
+      if (status) return status;
+    }
+    if (savedOpenDetect_[addr] >= 0) {
+      status = setOpenThermocoupleDetect(addr, savedOpenDetect_[addr]);
+      if (status) return status;
+    }
+  }
+  return 0;
+}
+
+asynStatus MultiFunction::connect(asynUser *pasynUser)
+{
+  if (!connected_) {
+    epicsUInt64 now = epicsMonotonicGet();
+    if (lastConnectAttempt_ && (now-lastConnectAttempt_)/1.e9 < RECONNECT_DELAY)
+      return asynDisconnected;
+    lastConnectAttempt_ = now;
+    ULMutex.lock();
+    int status;
+    if (!initialized_) {
+      status = initializeDevice();
+      if (!status) initialized_ = true;
+    } else {
+      #ifdef _WIN32
+        status = cbCreateDaqDevice(boardNum_, daqDeviceDescriptor_);
+      #else
+        status = ulConnectDaqDevice(daqDeviceHandle_);
+      #endif
+    }
+    if (!status) status = restoreTemperatureConfig();
+    if (status) {
+      #ifdef _WIN32
+        if (boardNum_ >= 0) cbReleaseDaqDevice(boardNum_);
+      #else
+        if (daqDeviceHandle_) {
+          ulDisconnectDaqDevice(daqDeviceHandle_);
+          if (!initialized_) {
+            ulReleaseDaqDevice(daqDeviceHandle_);
+            daqDeviceHandle_ = 0;
+          }
+        }
+      #endif
+      ULMutex.unlock();
+      reportError(status, "connect", "Device connection failed");
+      setInputStatus(asynDisconnected);
+      return asynDisconnected;
+    }
+    connected_ = true;
+    for (int i=0; i<MAX_IO_PORTS; i++) forceCallback_[i] = 1;
+    ULMutex.unlock();
+    setStringParam(lastErrorMessage_, "");
+    notifyConnection(true);
+    callParamCallbacks();
+  }
+  int state;
+  pasynManager->isConnected(pasynUser, &state);
+  if (!state) pasynManager->exceptionConnect(pasynUser);
+  return asynSuccess;
+}
+
+asynStatus MultiFunction::disconnect(asynUser *pasynUser)
+{
+  ULMutex.lock();
+  if (connected_) {
+    #ifdef _WIN32
+      cbReleaseDaqDevice(boardNum_);
+    #else
+      ulDisconnectDaqDevice(daqDeviceHandle_);
+    #endif
+  }
+  connected_ = false;
+  waveDigRunning_ = waveGenRunning_ = 0;
+  setIntegerParam(waveDigRun_, 0);
+  setIntegerParam(waveGenRun_, 0);
+  ULMutex.unlock();
+  setInputStatus(asynDisconnected);
+  notifyConnection(false);
+  for (int addr=0; addr<MAX_SIGNALS; addr++) callParamCallbacks(addr);
+  return asynSuccess;
+}
+
+bool MultiFunction::isConnectionError(int status)
+{
+  #ifdef _WIN32
+    return status == DEADDEV;
+  #else
+    return status == ERR_DEV_NOT_CONNECTED || status == ERR_DEAD_DEV ||
+           status == ERR_NO_CONNECTION_ESTABLISHED || status == ERR_DEV_NOT_FOUND ||
+           status == ERR_NET_IFC_UNAVAILABLE || status == ERR_NET_CONNECTION_FAILED ||
+           status == ERR_NET_TIMEOUT;
+  #endif
 }
 
 int  MultiFunction::reportError(int err, const char *functionName, const char *message)
@@ -1325,6 +1518,15 @@ int  MultiFunction::reportError(int err, const char *functionName, const char *m
         "%s::%s Error: %s, err=%d %s\n", driverName, functionName, message, err, libraryMessage);
   }
   ULMutex.unlock();
+  if (err) {
+    char messageBuffer[MAX_LIBRARY_MESSAGE_LEN + 128];
+    if (err == -1)
+      epicsSnprintf(messageBuffer, sizeof(messageBuffer), "%s: %s", functionName, message);
+    else
+      epicsSnprintf(messageBuffer, sizeof(messageBuffer), "%s: %s: %s (%d)",
+                    functionName, message, libraryMessage, err);
+    setStringParam(lastErrorMessage_, messageBuffer);
+  }
   return err;
 }
 
@@ -1927,7 +2129,7 @@ int MultiFunction::computeWaveDigTimes()
 asynStatus MultiFunction::getBounds(asynUser *pasynUser, epicsInt32 *low, epicsInt32 *high)
 {
   int function = pasynUser->reason;
-
+  if (!initialized_) return asynDisconnected;
 
   if (function == analogOutValue_) {
     *low = 0;
@@ -1950,6 +2152,7 @@ asynStatus MultiFunction::writeInt32(asynUser *pasynUser, epicsInt32 value)
   int range;
   int status=0;
   static const char *functionName = "writeInt32";
+  if (!connected_) return asynDisconnected;
 
   this->getAddress(pasynUser, &addr);
   setIntegerParam(addr, function, value);
@@ -2024,7 +2227,7 @@ asynStatus MultiFunction::writeInt32(asynUser *pasynUser, epicsInt32 value)
   }
 
   else if ((function == thermocoupleOpenDetect_) && isThermocouple) {
-    setOpenThermocoupleDetect(addr, value);
+    status = setOpenThermocoupleDetect(addr, value);
   }
 
   else if (function == temperatureSensor_) {
@@ -2199,6 +2402,18 @@ asynStatus MultiFunction::writeInt32(asynUser *pasynUser, epicsInt32 value)
   }
   ULMutex.unlock();
 
+  if (!status && addr >= 0 && addr < MAX_SIGNALS) {
+    if (function == thermocoupleType_) savedTCType_[addr] = value;
+    if (function == thermocoupleOpenDetect_) {
+      // These devices apply open detection to a complete channel bank.
+      int configAddr = addr;
+      if (boardFamily_ == USB_TC32) configAddr = (addr < 32) ? 0 : 32;
+      if (boardFamily_ == E_TC) configAddr = 0;
+      savedOpenDetect_[configAddr] = value;
+    }
+  }
+  if (isConnectionError(status)) disconnect(pasynUserSelf);
+
   // This is a separate if statement because these cases are also treated above
   if ((function == waveGenUserNumPoints_) ||
       (function == waveGenIntNumPoints_)) {
@@ -2283,6 +2498,7 @@ asynStatus MultiFunction::writeFloat64(asynUser *pasynUser, epicsFloat64 value)
   int function = pasynUser->reason;
   int status=0;
   static const char *functionName = "writeFloat64";
+  if (!connected_ && function != pollSleepMS_) return asynDisconnected;
 
   this->getAddress(pasynUser, &addr);
   setDoubleParam(addr, function, value);
@@ -2343,6 +2559,7 @@ asynStatus MultiFunction::writeUInt32Digital(asynUser *pasynUser, epicsUInt32 va
   int addr;
   epicsUInt32 direction=0;
   static const char *functionName = "writeUInt32Digital";
+  if (!connected_) return asynDisconnected;
 
   this->getAddress(pasynUser, &addr);
   setUIntDigitalParam(addr, function, value, mask);
@@ -2542,6 +2759,7 @@ asynStatus MultiFunction::readEnum(asynUser *pasynUser, char *strings[], int val
   const enumStruct_t *pEnum;
   int numEnums;
   //static const char *functionName = "readEnum";
+  if (!pBoardEnums_) { *nIn = 0; return asynDisconnected; }
 
   if (function == analogInRange_) {
     pEnum    = pBoardEnums_->pInputRange;
@@ -2602,6 +2820,17 @@ void MultiFunction::pollerThread()
 
   while(1) {
     lock();
+    int enabled = 0, automatic = 0;
+    pasynManager->isEnabled(portUser_, &enabled);
+    pasynManager->isAutoConnect(portUser_, &automatic);
+    if (!connected_ && enabled && automatic) connect(portUser_);
+    if (!connected_ || !enabled) {
+      for (i=0; i<MAX_SIGNALS; i++) callParamCallbacks(i);
+      unlock();
+      epicsThreadSleep(0.1);
+      continue;
+    }
+    int inputStatus = 0;
     ULMutex.lock();
     endTime = epicsTime::getCurrent();
     setDoubleParam(pollTimeMS_, (endTime-startTime)*1000.);
@@ -2619,7 +2848,7 @@ void MultiFunction::pollerThread()
           newValue = biVal16;
         }
       #else
-        unsigned long long data;
+        unsigned long long data = 0;
         status = ulDIn(daqDeviceHandle_, (DigitalPortType)digitalIOPort_[i], &data);
         newValue = (epicsUInt32) data;
       #endif
@@ -2630,6 +2859,7 @@ void MultiFunction::pollerThread()
         }
         goto error;
       }
+      setParamStatus(i, digitalInput_, asynSuccess);
       changedBits = newValue ^ prevInput[i];
       if (forceCallback_[i] || (changedBits != 0)) {
         prevInput[i] = newValue;
@@ -2655,6 +2885,7 @@ void MultiFunction::pollerThread()
         }
         goto error;
       }
+      setParamStatus(i, counterCounts_, asynSuccess);
       setIntegerParam(i, counterCounts_, countVal);
     }
 
@@ -2741,7 +2972,7 @@ void MultiFunction::pollerThread()
       // If the waveform digitizer is not running then read the analog inputs
       int range, type, mode;
       epicsInt32 value;
-      double tempValue;
+      double tempValue = epicsNAN;
       getIntegerParam(0, analogInMode_, &mode);
       for (i=0; i<numAnalogIn_; i++) {
         getIntegerParam(i, voltageInRange_, &range);
@@ -2759,6 +2990,13 @@ void MultiFunction::pollerThread()
             status = ulAIn(daqDeviceHandle_, i+4, aiInputMode_, ulRange, AIN_FF_DEFAULT, &tempValue);
           #endif
           reportError(status, functionName, "Calling AIn");
+          if (status) {
+            inputStatus = status;
+            setParamStatus(i, voltageInValue_, asynError);
+            if (isConnectionError(status)) goto error;
+            continue;
+          }
+          setParamStatus(i, voltageInValue_, asynSuccess);
           // We want to force a callback, even if the value is the same.
           // This can only be done by setting the value once to a different value, then the correct value
           setDoubleParam(i, voltageInValue_, tempValue+1);
@@ -2780,7 +3018,7 @@ void MultiFunction::pollerThread()
               value = (epicsInt32)ulongVal;
             }
           #else
-            double data;
+            double data = 0;
             Range ulRange;
             mapRange(range, &ulRange);
             status = ulAIn(daqDeviceHandle_, i, aiInputMode_, ulRange, AIN_FF_NOSCALEDATA, &data);
@@ -2788,6 +3026,14 @@ void MultiFunction::pollerThread()
           #endif
           // We want to force a callback, even if the value is the same.
           // This can only be done by setting the value once to a different value, then the correct value
+          if (status) {
+            inputStatus = status;
+            setParamStatus(i, analogInValue_, asynError);
+            reportError(status, functionName, "Calling AIn");
+            if (isConnectionError(status)) goto error;
+            continue;
+          }
+          setParamStatus(i, analogInValue_, asynSuccess);
           setIntegerParam(i, analogInValue_, value+1);
           setIntegerParam(i, analogInValue_, value);
         }
@@ -2824,6 +3070,7 @@ void MultiFunction::pollerThread()
                     "%s::%s unsupported Scale=%d\n", driverName, functionName, scale);
                   tempScale = TS_CELSIUS;
           }
+          tempValue = epicsNAN;
           status = ulTIn(daqDeviceHandle_, i, tempScale, flags, &tempValue);
           if (status == ERR_OPEN_CONNECTION) {
             // This is an "expected" error if the thermocouple is broken or disconnected
@@ -2832,7 +3079,14 @@ void MultiFunction::pollerThread()
             tempValue = -9999.;
           }
         #endif
-        //if (i==0) asynPrint(pasynUserSelf, ASYN_TRACE_ERROR, "ulTIn chan=%d, tempValue=%f\n", i, tempValue);
+        if (status) {
+          inputStatus = status;
+          setParamStatus(i, temperatureInValue_, asynError);
+          reportError(status, functionName, "Calling TIn");
+          if (isConnectionError(status)) goto error;
+          continue;
+        }
+        setParamStatus(i, temperatureInValue_, asynSuccess);
 
         // We want to force a callback, even if the value is the same.
         // This can only be done by setting the value once to a different value, then the correct value
@@ -2843,18 +3097,24 @@ void MultiFunction::pollerThread()
       } // for on channels
     } // waveDig not running
 
-    for (i=0; i<MAX_SIGNALS; i++) {
-      callParamCallbacks(i);
-    }
 error:
-    if (prevStatus && !status) {
-      reportError(-1, functionName, "Device returned to normal status");
+    if (isConnectionError(status)) {
+      disconnect(pasynUserSelf);
+    } else if (status && !inputStatus) {
+      setInputStatus(asynError);
     }
-    prevStatus = status;
+    if (status) inputStatus = status;
+    for (i=0; i<MAX_SIGNALS; i++) callParamCallbacks(i);
+    if (prevStatus && !inputStatus) {
+      setStringParam(lastErrorMessage_, "");
+      reportError(0, functionName, "Device returned to normal status");
+    }
+    prevStatus = inputStatus;
     double pollTime;
     getDoubleParam(pollSleepMS_, &pollTime);
     ULMutex.unlock();
     unlock();
+    if (pollTime < 1.) pollTime = 1.;
     epicsThreadSleep(pollTime/1000.);
   }
 }

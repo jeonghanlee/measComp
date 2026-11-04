@@ -17,6 +17,11 @@ On top of these drivers the module provides a layer that emulates the Windows UL
 The EPICS drivers thus always use the Windows UL API and are identical on Linux and Windows. 
 The E-1608, E-TC, E-TC32, E-DIO24, USB-1608G-2AO, USB-CTR08, USB-TEMP, USB-TEMP-AI and USB-31XX models are supported in these versions.
 
+## Connection recovery
+
+See [MultiFunction reconnection](docs/reconnection.md) for asyn controls,
+input alarm behavior, the Linux ULDAQ dependency patch, and transport tests.
+
 ## Supported models
 Models supported in measComp include:
 * The [E-1608](https://www.mccdaq.com/ethernet-data-acquisition/E-1608-Series)
