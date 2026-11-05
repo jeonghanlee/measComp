@@ -2603,6 +2603,7 @@ asynStatus MultiFunction::writeUInt32Digital(asynUser *pasynUser, epicsUInt32 va
             #endif
             reportError(status, functionName, "Calling BitOut");
           }
+          if (status) break;
         }
       }
     }
@@ -2636,12 +2637,14 @@ asynStatus MultiFunction::writeUInt32Digital(asynUser *pasynUser, epicsUInt32 va
             status = ulDBitOut(daqDeviceHandle_, (DigitalPortType)digitalIOPort_[addr], i, outValue);
           #endif
           reportError(status, functionName, "Calling DBitOut");
+          if (status) break;
         }
       }
     }
   }
   ULMutex.unlock();
 
+  if (isConnectionError(status)) disconnect(pasynUserSelf);
   callParamCallbacks();
   if (status == 0) {
     asynPrint(pasynUser, ASYN_TRACEIO_DRIVER,

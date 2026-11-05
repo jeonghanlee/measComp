@@ -27,6 +27,12 @@ clear their input errors. `LAST_ERROR_MESSAGE` records the most recent error and
 is cleared on connection or polling recovery. It is diagnostic text, not a
 replacement for each input record's alarm status.
 
+Digital output and direction writes apply the same transport-error handling
+before returning, without waiting for another poll. A multi-bit operation stops
+on its first vendor error; later bit writes cannot overwrite that result.
+Earlier successful bit writes are not rolled back. Non-transport errors return
+an error without disconnecting an otherwise healthy device.
+
 Successful thermocouple-type and open-detection writes are reapplied when the
 device reconnects. Thermocouple-type readback changes only after a successful
 write. A failed write retains the previous cache value; reconnection restores
@@ -67,10 +73,13 @@ ULDAQ build by its source commit, patch state and library hash: the upstream
 ## Verification scope
 
 The [reconnect test](../tests/README.md) runs the real MultiFunction driver, asyn,
-ULDAQ and EPICS temperature template against an external UDP/TCP TC32 fixture.
+ULDAQ and shipped EPICS temperature and binary-input templates against an external
+UDP/TCP TC32 fixture.
 It covers offline startup, EOF, incomplete headers, receive timeout, connection
 policy, invalid input alarms, last-value retention and configuration restoration.
 TC-type write failures are checked immediately through the public asynInt32
 cache read interface and after reconnect through normal asynInt32 SyncIO reads.
+Digital cases cover full-port write EOF, a non-final bit timeout, non-transport
+errors, input alarms and last values before another poll, and recovery controls.
 The fixture represents a TC32 without EXP-32. Real hardware power cycling,
 EXP-32, USB, Windows and other supported models require separate verification.

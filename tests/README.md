@@ -2,7 +2,7 @@
 
 The test compiles the repository's MultiFunction driver and device discovery
 code, links real EPICS/asyn/ULDAQ libraries, and loads the shipped
-`measCompTemperatureIn.template`. Only the external TC32 UDP/TCP transport is
+`measCompTemperatureIn.template` and `measCompBinaryIn.template`. Only the external TC32 UDP/TCP transport is
 simulated. Internal driver and library functions are not replaced.
 
 ## Prerequisites
@@ -89,6 +89,40 @@ Auto-connect is disabled for six seconds to verify that it prevents retries;
 port disable and enable must stop and resume polling. The fixture rejects
 unexpected protocol commands and requests for absent EXP-32 channels.
 
+## Digital write cases
+
+`--case` selects one independent case; omitting it runs `reconnect`. Every
+invocation starts a fresh IOC and fixture. Repeat the namespace setup above,
+then run these commands in that shell. Keep `BUILD` set to the existing build
+directory; each case uses a separate log path.
+
+```bash
+export TEMPLATE="$PWD/measCompApp/Db/measCompTemperatureIn.template"
+export IOC="$BUILD/reconnect-ioc"
+export DBD="$BUILD/reconnect.dbd"
+timeout 90s perl tests/test_reconnect.pl --case digital-word "$IOC" "$DBD" "$TEMPLATE" "$BUILD/word.log"
+timeout 90s perl tests/test_reconnect.pl --case digital-control "$IOC" "$DBD" "$TEMPLATE" "$BUILD/control.log"
+timeout 90s perl tests/test_reconnect.pl --case digital-policy "$IOC" "$DBD" "$TEMPLATE" "$BUILD/policy.log"
+timeout 90s perl tests/test_reconnect.pl --case digital-bits "$IOC" "$DBD" "$TEMPLATE" "$BUILD/bits.log"
+exit
+```
+
+All cases verify a successful full-port write, set a 10-second poll interval
+and observe a completed healthy poll before injecting the selected fault.
+The error result and input state must be observed before another input poll;
+the JSON records monotonic request times and actual request/reply bytes.
+
+| Case | Fault and acceptance |
+| --- | --- |
+| `digital-word` | EOF during `ulDOut`: return an error, disconnect immediately, set temperature and digital input severity to INVALID, preserve last valid input values, then recover. |
+| `digital-control` | A complete response with one unexpected byte produces real ULDAQ `ERR_BAD_BUFFER_SIZE`; return an error while retaining the healthy connection, then accept a normal write. |
+| `digital-policy` | After write EOF, restore the fixture with auto-connect disabled for 12 seconds. Disable the port and enable auto-connect for another 12 seconds; neither state permits recovery. A disabled-port write returns `asynDisabled` without device traffic. Enabling the port restores valid inputs. |
+| `digital-bits` | Drop the first selected bit's write request and response, retaining the socket for subsequent requests. The real vendor timeout must remain the operation result; disconnect and stop before a later bit can succeed. |
+
+Digital fault assertions compare the same temperature and binary-input values
+before failure, while INVALID, and after recovery. They do not verify output
+replay or rollback of earlier successful bit writes.
+
 ## Negative controls
 
 Apply each change separately to a scratch copy of the actual driver, rebuild
@@ -104,6 +138,9 @@ driver defect.
 | `ignore-auto` | Reconnect with auto-connect disabled | `autoconnect disabled but connected` |
 | `ignore-enable` | Poll with the port disabled | `disabled port stops polling` |
 | `no-channel-limit` | Remove the no-expansion temperature-count reduction | Startup recovery or an absent EXP-32 request; not currently detected |
+| `no-digital-disconnect` | Omit the connection-error transition in `writeUInt32Digital` | `digital word error disconnects immediately` in `digital-word` |
+| `overwrite-bit-error` | Remove the output bit loop's first-error break | `digital bit write preserves transport error` in `digital-bits` |
+| `disconnect-any-error` | Disconnect on every digital vendor error | `digital non-transport error keeps connection` in `digital-control` |
 
 This test does not establish hardware power-cycle behavior, sustained network
 loss endurance, Channel Access client reconnection, EXP-32, USB or Windows support.

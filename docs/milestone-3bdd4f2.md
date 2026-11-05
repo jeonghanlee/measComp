@@ -8,19 +8,19 @@ Git upstream: origin/site
 Remote tracker: [jeonghanlee/measComp milestone 1](https://github.com/jeonghanlee/measComp/milestone/1)
 GitHub milestone: Connection recovery and device selection
 Due date: none
-Remote milestone observed at: 2026-11-05T18:05:51Z; state: open
+Remote milestone observed at: 2026-11-05T19:00:53Z; state: open; one closed issue and five open issues
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/1`.
 Baseline commit: 3bdd4f24d820579f3f423c7be968baf2bb413950
 
-Next session entry point: Review M1's verified working-tree change for commit, remote landing and issue closure under their separate authorizations. Keep M2 through M6 pending separate implementation.
+Next session entry point: Prepare M2's verified and reviewed working-tree changes for commit, push and issue #3 reconciliation under the corresponding authorizations. M1 is complete; M3 through M6 await separate implementation.
 
 ## Scope
 
-This document assigns issues #2 through #7 to six work units for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. M1 is accepted and authorized for implementation; M2 through M6 remain draft plans.
+This document assigns issues #2 through #7 to six work units for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. M1 is complete. M2 is accepted and authorized for implementation; M3 through M6 remain draft plans.
 
 The common integration environment is Linux with the real measComp driver, EPICS Base 7.0.10, asyn 4.45 and patched ULDAQ 1.2.2. Extend the shipped Perl/Bash tests and retain `tests/reconnect_ioc.cpp`; use external device protocol fixtures, without replacing internal driver, asyn or ULDAQ functions. Record the source commit, dependency identities, assertions, fixture requests and native IOC exit status for each executed check. Checks reproducing a defect must fail for the intended assertion on the affected baseline and pass on the fixed code; setup and build failures do not establish a regression. Compatibility checks and positive controls must pass on both the baseline and fixed code. When a check combines these purposes, record the defect assertion separately from its controls.
 
-Existing failure observations below come from the linked issues at the baseline commit. They are not successful verification of a fix. M1 records observed post-fix verification; checks for M2 through M6 remain pending. The analog metadata findings are separate from the normal floating-point TC32 temperature path. MAC rediscovery and same-IP/different-discovery-port selection retain their specific applicability conditions.
+Existing failure observations below come from the linked issues at the baseline commit. They are not successful verification of a fix. M1 and M2 record observed post-fix verification; checks for M3 through M6 remain pending. M2 still requires repository landing and issue closure. The analog metadata findings are separate from the normal floating-point TC32 temperature path. MAC rediscovery and same-IP/different-discovery-port selection retain their specific applicability conditions.
 
 **Out of scope:** ULDAQ vendor patch development, upstream submissions, release numbering, tags, deployment, output-command replay, and a general qualification of Windows, USB, EXP-32 or hardware power cycling. Changes to `docs/reconnection.md` and `tests/README.md` belong to the affected work unit when behavior or test invocation changes. Existing test limitations remain explicit.
 
@@ -30,14 +30,14 @@ Existing failure observations below come from the linked issues at the baseline 
 
 | ID | Work unit | Type | Status | Ready | Deps | Done when / Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| M1 | TC write and readback consistency | Milestone | In progress | No | | Device and cache agree after a failed write and reconnect; [detail](#m1---tc-write-and-readback-consistency) |
-| M2 | Digital output failure handling | Milestone | Not started | Yes | | Transport errors disconnect and invalidate inputs before the next poll; [detail](#m2---digital-output-failure-handling) |
+| M1 | TC write and readback consistency | Milestone | Complete | No | | Device and cache agree after a failed write and reconnect; [detail](#m1---tc-write-and-readback-consistency) |
+| M2 | Digital output failure handling | Milestone | In progress | No | | Transport errors disconnect and invalidate inputs before the next poll; [detail](#m2---digital-output-failure-handling) |
 | M3 | Analog enum initialization | Milestone | Not started | Yes | | Offline-start records obtain the same enums as online-start records; [detail](#m3---analog-enum-initialization) |
 | M4 | Analog conversion initialization | Milestone | Not started | Yes | | Offline-start conversion matches online-start conversion and measured raw values; [detail](#m4---analog-conversion-initialization) |
 | M5 | MAC device rediscovery | Milestone | Not started | Yes | | An initially absent MAC-selected device connects without disturbing existing ports; [detail](#m5---mac-device-rediscovery) |
 | M6 | Discovery endpoint identity | Milestone | Not started | Yes | | Devices sharing an IP but using different discovery ports remain independent; [detail](#m6---discovery-endpoint-identity) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: one In progress and five Not started. `Ready` records dependency readiness only; the remaining draft plans still require acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
+The row order follows issue numbers and imposes no execution dependency. Current status: one Complete, one In progress and four Not started. `Ready` records dependency readiness only; the remaining draft plans still require acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
 
 ### Milestone Details
 
@@ -46,7 +46,7 @@ The row order follows issue numbers and imposes no execution dependency. Current
 Origin: 3bdd4f2 / M1
 Identity History: none
 GitHub Issue: [#2](https://github.com/jeonghanlee/measComp/issues/2)
-Status: In progress
+Status: Complete
 
 ##### Summary
 
@@ -109,19 +109,20 @@ Verification evidence:
 
 ##### Closure Evidence
 
-- The accepted implementation and T1 through T3 are verified in the working tree. TC writes commit the cache only after vendor success, and successful restoration reconciles the cache before connection callbacks are published for temperature addresses.
+- The accepted implementation and T1 through T3 are verified in 98415c0d604a386c4b946f67857624ffe6923b55. TC writes commit the cache only after vendor success, and successful restoration reconciles the cache before connection callbacks are published for temperature addresses.
 - Review acceptance: 2026-11-05; first-person, third-person and second-person self-review completed for the M1 implementation and documentation. No unresolved in-scope findings remain. The third-person check confirmed all 12 recorded build inputs still match the files and the IOC resolves the intended vendor and EPICS libraries.
-- Commit identity, remote landing evidence and linked-issue closure remain pending. No exception waives these conditions; M1 remains In progress.
+- Remote landing observed at 2026-11-05T19:06:14Z: after fetching `origin`, `origin/site` was 7ccb7d0b86c64582eafd369332078cd396ffedd6 and contained 98415c0d604a386c4b946f67857624ffe6923b55. Comparing the five changed driver, test and documentation files between the fix commit and `origin/site` produced no differences. Recheck with `git fetch origin`, `git branch -r --contains 98415c0` and a path-limited `git diff 98415c0 origin/site`.
+- Issue #2 was observed closed with reason `completed` at 2026-11-05T19:01:10Z; GitHub recorded closure at 2026-11-05T19:00:37Z. Its body matches the verified implementation, all four acceptance items are checked, and the result comment is https://github.com/jeonghanlee/measComp/issues/2#issuecomment-6666614605. No completion condition is waived.
 
 ##### GitHub Projection
 
 Title: Keep thermocouple readback consistent after a failed write
 Labels: bug
 GitHub Milestone: Connection recovery and device selection
-Observed State: open
+Observed State: closed
 Observed Labels: bug
 Observed Milestone: Connection recovery and device selection (milestone 1)
-Last Compared: 2026-11-05T18:05:51Z; remote updated at 2026-11-05T18:04:59Z
+Last Compared: 2026-11-05T19:01:10Z; remote updated at 2026-11-05T19:00:37Z
 
 Recheck metadata with `gh issue view 2 --repo jeonghanlee/measComp --json state,labels,milestone,updatedAt`.
 
@@ -130,7 +131,7 @@ Recheck metadata with `gh issue view 2 --repo jeonghanlee/measComp --json state,
 Origin: 3bdd4f2 / M2
 Identity History: none
 GitHub Issue: [#3](https://github.com/jeonghanlee/measComp/issues/3)
-Status: Not started
+Status: In progress
 
 ##### Summary
 
@@ -157,13 +158,13 @@ Out of scope: automatic digital output replay, changing digital direction semant
 
 ##### Implementation Plan
 
-Plan Status: draft
-Plan Acceptance: none
-Implementation Authorization: none
+Plan Status: accepted
+Plan Acceptance: 2026-11-05; the reviewed issue #3 plan was accepted as the next item in sequential implementation.
+Implementation Authorization: 2026-11-05; proceed with the next issue after #2 closure.
 Superseded Plan Artifacts: none
 
 1. Apply the existing connection-error classification to digital vendor writes and invoke the normal disconnect path after releasing the vendor mutex.
-2. Preserve a transport failure across any multi-bit write loop so a later successful operation cannot erase it; retain non-transport error reporting.
+2. Stop multi-bit write processing on the first vendor error so later successful operations cannot erase it; retain non-transport error reporting without disconnecting a healthy port.
 3. Add public port-state and input-alarm observations before the next poll, with normal-write and non-transport-error controls.
 
 ##### Test Plan
@@ -173,20 +174,41 @@ Superseded Plan Artifacts: none
 | T1 | Integration | Set all port bits to output and use the full-port mask to exercise `ulDOut`; confirm a successful write, wait until the poller sleeps, inject EOF during another word write, and inspect temperature and digital inputs before the next poll. | Common integration environment; TC32 fixture; long poll interval | Fixture traffic confirms the word-write path; the failed write disconnects the port immediately, input severity becomes INVALID, and last valid input values remain available. |
 | T2 | Integration | During a word write, return a complete response with the matching command and frame ID, a correct checksum and one unexpected payload byte. Confirm that real ULDAQ returns `ERR_BAD_BUFFER_SIZE`, then issue a normal write. A nonzero response status alone is not an error trigger in this ULDAQ path. | Common integration environment; external TC32 protocol fixture | The failed operation reports `asynError` without disconnecting a healthy device; the next normal write succeeds. This is a compatibility control and must also pass on the baseline. |
 | T3 | Integration | While connected and enabled, disable auto-connect, inject a write transport failure and confirm disconnection. Restore the fixture and verify that auto-connect disabled prevents recovery. Disable the port, enable auto-connect, and verify that the disabled port still prevents recovery; a write then returns `asynDisabled` without device traffic. Finally enable the port and observe recovery. | Common integration environment; TC32 fixture; observations spanning the reconnect interval | The fault occurs while writes are enabled. Both controls independently prevent recovery; enabling both permits reconnection and clears input alarms after valid reads. |
-| T4 | Integration | Select at least two output bits with a partial-port mask to exercise the `ulDBitOut` loop. Suppress one response for a non-final selected bit until the vendor call times out, keep the socket open, discard that response, and answer subsequent requests normally. Record the real read/write request sequence and inspect the public result and input state before the next poll. | Common integration environment; external TC32 protocol fixture; long poll interval | The baseline exposes an earlier transport failure overwritten by a later successful bit operation. Fixed code returns an error, disconnects and invalidates inputs while preserving their last valid values. If it stops the loop on failure, no later bit requests occur; if it continues, successful later requests cannot erase the error. |
+| T4 | Integration | Select at least two output bits with a partial-port mask to exercise the `ulDBitOut` loop. Suppress one response for a non-final selected bit until the vendor call times out, keep the socket open, discard that response, and answer subsequent requests normally. Record the real read/write request sequence and inspect the public result and input state before the next poll. | Common integration environment; external TC32 protocol fixture; long poll interval | The baseline exposes an earlier transport failure overwritten by a later successful bit operation. Fixed code returns an error, disconnects and invalidates inputs while preserving their last valid values. Processing stops on the first error, with no later bit requests. |
+
+Execution contract: each case starts a fresh IOC and external fixture in an isolated Linux network namespace. The executable contains the actual driver and discovery source, real EPICS/asyn/ULDAQ libraries, and shipped temperature and binary-input templates. Only the external device transport is simulated. Perl 5.26.3 is the oldest CLI target; the integration host uses Perl 5.40.1. Runtime evidence is retained below `work/m2-digital/`, separately for baseline, fixed code and scratch mutations.
+
+| Safeguard | Criterion and evidence |
+| --- | --- |
+| Volume and limits | Each digital case has a 90-second outer deadline; the existing reconnect case has 100 seconds. Retain complete IOC logs, request/reply traces, JSON checks and native exit codes. Record actual file sizes and request counts; this bounded functional test does not establish sustained retention or endurance. |
+| Expected results | T1-T4 define connection, severity, value and write-result expectations independently of observed results. T2 must also pass on the baseline. A missing response or incomplete case is not acceptance. |
+| Time boundaries | Set the poll interval to 10 seconds and observe the final temperature request before injection. Require the failure observation within that interval and no intervening input poll in the trace. T3 observes each disabled control for 12 seconds. Use monotonic timestamps for intervals and UTC for run correlation. |
+| Fault application | Record selected command, frame, payload, fault mode and actual error diagnostic. EOF closes the external socket; bit timeout drops one response without closing it; the non-transport control returns a complete checksummed response with one unexpected byte. |
+| Measurement meaning | Each trace belongs to one fresh fixture/IOC lifetime. Connection counts and request counts are per fixture; state snapshots include the public port state and actual record values/severities. Permit callback completion only inside the same no-poll observation window. |
+| Source and dependencies | Retain builder commands, source SHA-256 manifest, executable hash and linked-library identities for each build. Execute the shipped Perl entry point with the generated IOC and DBD. Baseline and scratch mutants use the same fixtures. |
+| Case coverage | Run T1-T4 separately and the existing reconnect suite. Baseline word/bit failures must occur at their intended assertions. Scratch mutations that omit first-error handling or classify a non-transport error as transport must fail the corresponding checks. Retain setup-failure and handled-interruption outcomes separately. |
+
+Long observations, archive transfer, offline replay and durable two-stage terminal-save protocols are not part of this test contract. No claim is made for hardware, Windows, USB or expansion devices.
 
 ##### Verification Results
 
 | Label | Observed At | Environment | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| T1 | Not run | Common integration environment | Pending | None |
-| T2 | Not run | Common integration environment | Pending | None |
-| T3 | Not run | Common integration environment | Pending | None |
-| T4 | Not run | Common integration environment | Pending | None |
+| T1 | 2026-11-05T19:23:36Z | Debian 13; common integration environment; isolated TC32 fixture | Passed | `work/m2-digital/fixed-final/digital-word.log.json`: 11/11 checks, native test and IOC exit 0. Baseline `baseline-2/digital-word-final` returns an error but retains connected/NO_ALARM before any next poll, failing the intended immediate-disconnect assertion. |
+| T2 | 2026-11-05T19:23:26Z | Same real stack; complete external response with one unexpected byte | Passed | `work/m2-digital/fixed-final/digital-control.log.json`: 12/12 checks, error 9, retained connection, subsequent successful write, native test and IOC exit 0. Baseline control also passes 12/12. `disconnect-any-error/build/digital-control` fails at the intended connection-retention assertion. |
+| T3 | 2026-11-05T19:23:50Z | Same real stack; separate fresh IOC and fixture | Passed | `work/m2-digital/fixed-final/digital-policy.log.json`: 17/17 checks; both disabled-control windows span 12 seconds, no extra connection, disabled write returns status 5 with request count unchanged at 244, then recovery; native test and IOC exit 0. |
+| T4 | 2026-11-05T19:23:36Z | Same real stack; socket retained while one bit response is suppressed | Passed | `work/m2-digital/fixed-final/digital-bits.log.json`: 15/15 checks, 3.220-second write failure, status 3, disconnected/INVALID with unchanged values, exactly one read and one write before failure observation; native test and IOC exit 0. Baseline `baseline-2/digital-bits-verified` and `overwrite-bit-error/build/digital-bits` both fail the intended retained-error assertion after later successful bit traffic. |
+
+The fixed driver SHA-256 is `7d5d220de8c1d6bf958c740ba62bd3714578ad44bf8b27d31aca73ac2287fcdc`; the test executable is `8f0f76d8532ac6a0f9a144e001dda3b583d5ed8ca17f1c89f9b8db80c7c1eef3`. `work/m2-digital/fixed-final/inputs.json` retains 13 build input hashes, all matched to the verified source. Each run also retains its current test hashes, UTC bounds, stdout/stderr, native status and full JSON trace. `work/m2-digital/libraries.txt` and `libraries.sha256` identify the loaded dependencies. The patched ULDAQ hash is `6ff4e93258081a8936416698a798ffdd5536255deb8a2d681344fc4bc86439e4`.
+
+The existing reconnect case passed 38/38 at 2026-11-05T19:24:11Z (`fixed-final/reconnect.log.json`, native test and IOC exit 0), giving 93/93 checks across the five final cases. Their JSON evidence contains 211 to 1,136 requests per case and occupies 45,710 to 244,371 bytes per file. `work/m2-digital/results.txt` records the exact counts. The baseline word/control runs preceded the final timeout diagnostic adjustment; that adjustment only changes the bit-timeout assertion from error 103 to errors 7 or 103. The final baseline bit run and both scratch mutants use the final test bytes. In this fixture ULDAQ reports error 7 after the receive timeout because its UDP connection-code probe does not report the device as busy; the retained TCP trace independently establishes later successful requests on the baseline.
+
+Perl syntax, POD and CLI checks passed on Debian 13 / Perl 5.40.1 and the existing Rocky 8 image / Perl 5.26.3. The Rocky image identity and module probe are retained in `work/m2-digital/rocky8-image.txt`, `rocky8-cli.txt` and `rocky8-final.txt`; no Rocky IOC integration result is claimed. Initial missing-template failure and TERM interruption were exercised through the shipped CLI after observing the real IOC and listening sockets. `work/m2-digital/lifecycle.txt` and `fixed-final/lifecycle-*` retain native runner exits 1/143, child identities, and socket observations proving cleanup without an external cleanup guard.
 
 ##### Closure Evidence
 
-- None. No fix or successful post-fix verification is recorded.
+- The working-tree implementation and T1-T4 are verified. M2 remains In progress until its repository changes are committed and observed on `origin/site`, and issue #3 is observed closed. No external completion condition is waived.
+- Review acceptance: 2026-11-05; four direct self-review passes (first-person, third-person, second-person, second-person recheck), no delegated review. The reader pass found a missing `TEMPLATE` definition after leaving the earlier namespace; the digital instructions now establish it explicitly. Commands extracted directly from the corrected README passed all 55 digital checks with normal IOC exits and shell exit 0; evidence is `work/m2-digital/readme-digital.stdout`, `readme-digital.stderr` and `fixed-final/{word,control,policy,bits}.log.json`. The third-person pass rechecked request order, connection identity and recorded response frames/checksums. No unresolved in-scope finding remains.
 
 ##### GitHub Projection
 

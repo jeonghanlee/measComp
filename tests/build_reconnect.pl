@@ -119,6 +119,7 @@ sub main {
 
     my @members = (@sources, "$repository/measCompApp/src/measCompDiscover.h",
         "$repository/measCompApp/Db/measCompTemperatureIn.template",
+        "$repository/measCompApp/Db/measCompBinaryIn.template",
         "$RealBin/test_reconnect.pl", "$RealBin/TC32.pm", "$RealBin/build_reconnect.pl",
         "$asyn/include/asynDriver.h", "$include/uldaq.h", "$library/libuldaq.so");
     my %hashes;

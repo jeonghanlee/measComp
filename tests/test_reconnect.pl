@@ -3,6 +3,8 @@ use strict;
 use warnings;
 
 use Errno qw(EINTR);
+use File::Basename qw(dirname);
+use File::Spec;
 use FindBin qw($RealBin);
 use lib $RealBin;
 use Getopt::Long qw(GetOptionsFromArray);
@@ -17,10 +19,13 @@ use TC32;
 
 my $JSON = JSON::PP->new->canonical;
 my $signal_status = 0;
-my @STATE_FIELDS = qw(connected auto enabled pact udf severity value severity31 value31);
+my @STATE_FIELDS = qw(connected auto enabled pact udf severity value severity31 value31 digital_severity digital_value);
 my $READ_TIMEOUT = 8;
 my $RECOVERY_TIMEOUT = 12;
 my $EXIT_TIMEOUT = 5;
+my $DIGITAL_POLL_MS = 10000;
+my $POLICY_WINDOW = 12;
+my %CASES = map { $_ => 1 } qw(reconnect digital-word digital-control digital-policy digital-bits);
 
 sub now {
     return clock_gettime(CLOCK_MONOTONIC);
@@ -28,6 +33,7 @@ sub now {
 
 sub launch_ioc {
     my ($run, $executable, $dbd, $template) = @_;
+    my $binary_template = File::Spec->catfile(dirname($template), 'measCompBinaryIn.template');
     pipe(my $input_read, my $input_write) or die "IOC input pipe: $!\n";
     pipe(my $output_read, my $output_write) or die "IOC output pipe: $!\n";
     my $pid = fork();
@@ -39,7 +45,7 @@ sub launch_ioc {
         $SIG{INT} = $SIG{TERM} = $SIG{PIPE} = 'DEFAULT';
         {
             no warnings 'exec';
-            exec { $executable } $executable, $dbd, $template, $run->{device}{address};
+            exec { $executable } $executable, $dbd, $template, $run->{device}{address}, $binary_template;
         }
         POSIX::_exit(127);
     }
@@ -67,6 +73,7 @@ sub pump {
             my $line = $1;
             $line =~ s/\s+\z//;
             push @{$run->{lines}}, $line;
+            push @{$run->{diagnostics}}, $line if $line =~ /err=\d+/;
         }
     }
     return;
@@ -194,6 +201,175 @@ sub reap {
     return 1;
 }
 
+sub digital_window {
+    my ($run) = @_;
+    my $device = $run->{device};
+    check($run, 'set digital observation interval',
+        command($run, "POLL $DIGITAL_POLL_MS") eq 'RESULT 0', $DIGITAL_POLL_MS);
+    my $cursor = @{$device->{traffic}};
+    my $deadline = now() + $RECOVERY_TIMEOUT;
+    while (now() < $deadline) {
+        pump($run, 0.02);
+        while ($cursor < @{$device->{traffic}}) {
+            my $request = $device->{traffic}[$cursor++];
+            next unless $request->{command} == 0x12;
+            my (undef, undef, $channels) = unpack('CCV', pack('H*', $request->{payload}));
+            next unless $channels == 0x80000000;
+            my $observed = state($run);
+            check($run, 'digital observation starts after a healthy poll',
+                $observed->{connected} == 1 && $observed->{severity} == 0
+                && $observed->{severity31} == 0 && $observed->{digital_severity} == 0
+                && $observed->{digital_value} == 1, {state => $observed, request => $request});
+            return {time => $request->{time}, cursor => scalar @{$device->{traffic}}, state => $observed};
+        }
+    }
+    die "digital observation poll deadline exceeded\n";
+}
+
+sub digital_observation {
+    my ($run, $window) = @_;
+    my $observed = state($run);
+    my $deadline = now() + 1;
+    while (!$observed->{connected} && now() < $deadline
+        && ($observed->{severity} != 3 || $observed->{severity31} != 3
+            || $observed->{digital_severity} != 3)) {
+        pause($run, 0.01);
+        $observed = state($run);
+    }
+    my @traffic = @{$run->{device}{traffic}}[$window->{cursor} .. $#{$run->{device}{traffic}}];
+    my $elapsed = now() - $window->{time};
+    check($run, 'digital failure observed before another poll',
+        $elapsed < $DIGITAL_POLL_MS / 1000
+        && !grep({ $_->{command} == 0x00 || $_->{command} == 0x12 } @traffic),
+        {elapsed => $elapsed, requests => \@traffic, state => $observed});
+    return ($observed, \@traffic);
+}
+
+sub digital_policy {
+    my ($run) = @_;
+    my $device = $run->{device};
+    my $connections = $device->{connections};
+    $device->{online} = 1;
+    my $deadline = now() + $POLICY_WINDOW;
+    my $unchanged = 1;
+    while (now() < $deadline) {
+        my $observed = state($run);
+        $unchanged = 0 if $observed->{connected};
+        pause($run, 0.1);
+    }
+    check($run, 'digital autoconnect off prevents recovery',
+        $unchanged && $device->{connections} == $connections,
+        {seconds => $POLICY_WINDOW, connections => $device->{connections}});
+    check($run, 'digital disable port', command($run, 'ENABLE 0') eq 'RESULT 0', 'ENABLE 0');
+    check($run, 'digital enable autoconnect', command($run, 'AUTO 1') eq 'RESULT 0', 'AUTO 1');
+    $deadline = now() + $POLICY_WINDOW;
+    $unchanged = 1;
+    while (now() < $deadline) {
+        my $observed = state($run);
+        $unchanged = 0 if $observed->{connected};
+        pause($run, 0.1);
+    }
+    my $requests = $device->{requests};
+    my $result = command($run, 'DOUT 3 ffffffff');
+    check($run, 'digital disabled port prevents recovery and writes',
+        $unchanged && $device->{connections} == $connections
+        && $result eq 'RESULT 5' && $device->{requests} == $requests,
+        {seconds => $POLICY_WINDOW, result => $result, connections => $device->{connections},
+         requests_before => $requests, requests_after => $device->{requests}});
+    check($run, 'digital enable port', command($run, 'ENABLE 1') eq 'RESULT 0', 'ENABLE 1');
+    return;
+}
+
+sub exercise_digital {
+    my ($run) = @_;
+    my $device = $run->{device};
+    read_prefix($run, 'READY');
+    my $initial = state($run);
+    check($run, 'digital offline startup', $initial->{connected} == 0, $initial);
+    $device->{online} = 1;
+    healthy($run, $device->{temperature});
+    check($run, 'digital output direction', command($run, 'DIR ffffffff ffffffff') eq 'RESULT 0',
+        $device->{digital_out});
+    my $cursor = @{$device->{traffic}};
+    my $result = command($run, 'DOUT a5a5a5a5 ffffffff');
+    my @writes = grep { $_->{command} == 0x03 }
+        @{$device->{traffic}}[$cursor .. $#{$device->{traffic}}];
+    check($run, 'digital full-port write reaches device', $result eq 'RESULT 0'
+        && @writes == 1 && $writes[0]{payload} eq '01a5a5a5a5'
+        && $device->{digital_out}[0] == 0xa5a5a5a5, {result => $result, requests => \@writes});
+
+    my $case = $run->{case};
+    if ($case eq 'digital-policy' || $case eq 'digital-bits') {
+        check($run, 'digital disable autoconnect', command($run, 'AUTO 0') eq 'RESULT 0', 'AUTO 0');
+    }
+    my $window = digital_window($run);
+    my $mode = $case eq 'digital-control' ? 'bad-size' : $case eq 'digital-bits' ? 'drop' : 'eof';
+    my $faults = @{$device->{faults}};
+    $device->{fault} = [0x03, $mode];
+    my $started = now();
+    $result = command($run, $case eq 'digital-bits' ? 'DOUT 3 3' : 'DOUT 3 ffffffff');
+    my $duration = now() - $started;
+    my ($observed, $traffic) = digital_observation($run, $window);
+    check($run, 'digital fault reaches selected write', !defined($device->{fault})
+        && @{$device->{faults}} == $faults + 1 && $device->{faults}[-1][0] == 0x03
+        && $device->{faults}[-1][1] eq $mode,
+        {fault => $device->{faults}[-1], duration => $duration, result => $result});
+
+    if ($case eq 'digital-control') {
+        my ($fault) = grep { ($_->{fault} // '') eq 'bad-size' } @$traffic;
+        my $reply = pack('H*', $fault->{reply});
+        my ($start, $code, $frame, $status, $length) = unpack('CCCCv', $reply);
+        check($run, 'digital non-transport response is complete', length($reply) == 8
+            && $start == 0xdb && $code == 0x83 && $frame == $fault->{frame}
+            && $status == 0 && $length == 1 && unpack('%32C*', $reply) % 256 == 255, $fault);
+        check($run, 'digital non-transport error keeps connection', $result eq 'RESULT 3'
+            && $observed->{connected} == 1 && $observed->{severity} == 0
+            && $observed->{digital_severity} == 0
+            && scalar(grep { /writeUInt32Digital.*err=9\b/ } @{$run->{diagnostics}}),
+            {result => $result, state => $observed, diagnostics => $run->{diagnostics}});
+        $result = command($run, 'DOUT 5 ffffffff');
+        check($run, 'digital write succeeds after non-transport error', $result eq 'RESULT 0'
+            && $device->{digital_out}[0] == 5, {result => $result, device => $device->{digital_out}});
+    } else {
+        if ($case eq 'digital-bits') {
+            check($run, 'digital bit response timeout reaches driver', $duration >= 3
+                && $duration < $DIGITAL_POLL_MS / 1000 && $device->{online}
+                && scalar(grep { /writeUInt32Digital.*err=(?:7|103)\b/ } @{$run->{diagnostics}}),
+                {duration => $duration, result => $result, requests => $traffic, diagnostics => $run->{diagnostics}});
+        }
+        my $name = $case eq 'digital-bits' ? 'digital bit write preserves transport error'
+                                         : 'digital word error disconnects immediately';
+        check($run, $name, $result eq 'RESULT 3' && $observed->{connected} == 0
+            && $observed->{severity} == 3 && $observed->{severity31} == 3
+            && $observed->{digital_severity} == 3
+            && $observed->{value} == $window->{state}{value}
+            && $observed->{value31} == $window->{state}{value31}
+            && $observed->{digital_value} == $window->{state}{digital_value},
+            {result => $result, state => $observed, baseline => $window->{state}, requests => $traffic});
+        if ($case eq 'digital-bits') {
+            check($run, 'digital bit write stops after first error', @$traffic == 2
+                && $traffic->[0]{command} == 0x02 && $traffic->[1]{command} == 0x03, $traffic);
+            check($run, 'digital restore autoconnect', command($run, 'AUTO 1') eq 'RESULT 0', 'AUTO 1');
+        }
+        if ($case eq 'digital-policy') { digital_policy($run); }
+        else { $device->{online} = 1; }
+        my $recovered = wait_for($run, sub {
+            my ($state) = @_;
+            return $state->{connected} == 1 && $state->{severity} == 0 && $state->{severity31} == 0
+                && $state->{digital_severity} == 0;
+        });
+        check($run, 'digital recovery restores valid inputs',
+            $recovered->{value} == $window->{state}{value}
+            && $recovered->{value31} == $window->{state}{value31}
+            && $recovered->{digital_value} == $window->{state}{digital_value}, $recovered);
+    }
+    check($run, 'digital fixture commands supported', !@{$device->{errors}}, $device->{errors});
+    print {$run->{input}} "QUIT\n" or die "IOC input write: $!\n";
+    wait_exit($run, $EXIT_TIMEOUT) or die "IOC exit deadline exceeded\n";
+    check($run, 'digital IOC exits normally', $run->{ioc_exit} == 0, $run->{ioc_exit});
+    return;
+}
+
 sub wait_exit {
     my ($run, $timeout) = @_;
     my $deadline = now() + $timeout;
@@ -301,7 +477,9 @@ sub finalize {
     }
     my $device = $run->{device};
     my $evidence = {checks => $run->{checks}, faults => $device ? $device->{faults} : [],
-        fixture_errors => $device ? $device->{errors} : [], ioc_exit => $run->{ioc_exit}};
+        fixture_errors => $device ? $device->{errors} : [], ioc_exit => $run->{ioc_exit},
+        case => $run->{case}, diagnostics => $run->{diagnostics},
+        traffic => $device ? $device->{traffic} : []};
     my $path = "$run->{log_path}.json";
     open(my $out, '>:raw', $path) or die "$path: $!\n";
     print {$out} $JSON->pretty->indent_length(2)->encode($evidence) or die "$path: write: $!\n";
@@ -313,19 +491,24 @@ sub finalize {
 sub main {
     my (@args) = @_;
     my $help;
+    my $case = 'reconnect';
     Getopt::Long::Configure('no_auto_abbrev', 'no_ignore_case');
-    GetOptionsFromArray(\@args, 'help' => \$help) or pod2usage(-exitval => 2, -verbose => 0);
+    GetOptionsFromArray(\@args, 'help' => \$help, 'case=s' => \$case)
+        or pod2usage(-exitval => 2, -verbose => 0);
     pod2usage(-exitval => 0, -verbose => 1) if $help;
+    pod2usage(-exitval => 2, -message => "Unknown case: $case") unless $CASES{$case};
     pod2usage(-exitval => 2, -message => 'Expected IOC, DBD, template and log paths') unless @args == 4;
     my ($executable, $dbd, $template, $log_path) = @args;
-    my $run = {checks => [], lines => [], buffer => '', log_path => $log_path, ioc_exit => undef};
+    my $run = {checks => [], lines => [], diagnostics => [], buffer => '',
+        log_path => $log_path, ioc_exit => undef, case => $case};
     open($run->{log}, '>:raw', $log_path) or die "$log_path: $!\n";
     $run->{log}->autoflush(1);
     STDOUT->autoflush(1);
     my $success = eval {
         $run->{device} = TC32->new();
         launch_ioc($run, $executable, $dbd, $template);
-        exercise($run);
+        if ($case eq 'reconnect') { exercise($run); }
+        else { exercise_digital($run); }
         1;
     };
     my $error = $@;
@@ -367,11 +550,15 @@ perl tests/test_reconnect.pl IOC DBD TEMPLATE LOG
 
 Print usage and exit successfully.
 
+=item --case NAME
+
+Select reconnect (default), digital-word, digital-control, digital-policy or digital-bits. Each invocation creates a fresh IOC and external fixture.
+
 =back
 
 =head1 ARGUMENTS
 
-IOC is the executable built by build_reconnect.pl; DBD is its generated database definition. TEMPLATE is the shipped measCompTemperatureIn.template. LOG receives the complete IOC output and LOG.json receives assertion evidence, injected faults, fixture errors and the IOC exit status. Run inside the isolated network namespace described in tests/README.md.
+IOC is the executable built by build_reconnect.pl; DBD is its generated database definition. TEMPLATE is the shipped measCompTemperatureIn.template; measCompBinaryIn.template must be in the same directory. LOG receives the complete IOC output and LOG.json receives assertion evidence, timestamped device requests, response frames, injected faults, fixture errors and the IOC exit status. Run inside the isolated network namespace described in tests/README.md.
 
 =head1 EXIT STATUS
 

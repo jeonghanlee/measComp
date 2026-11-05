@@ -4,6 +4,9 @@
 #include <asynDriver.h>
 #include <asynInt32.h>
 #include <asynInt32SyncIO.h>
+#include <asynFloat64SyncIO.h>
+#include <asynUInt32Digital.h>
+#include <asynUInt32DigitalSyncIO.h>
 #include <asynShellCommands.h>
 #include <dbAccess.h>
 #include <dbStaticLib.h>
@@ -29,9 +32,10 @@ static void state(asynUser *port)
     pasynManager->isAutoConnect(port, &automatic);
     pasynManager->isEnabled(port, &enabled);
     double value = field("TEST:T0.VAL");
-    std::printf("STATE %d %d %d %.0f %.0f %.0f %.9g %.0f %.9g\n", connected, automatic, enabled,
+    std::printf("STATE %d %d %d %.0f %.0f %.0f %.9g %.0f %.9g %.0f %.0f\n", connected, automatic, enabled,
                 field("TEST:T0.PACT"), field("TEST:T0.UDF"), field("TEST:T0.SEVR"), value,
-                field("TEST:T31.SEVR"), field("TEST:T31.VAL"));
+                field("TEST:T31.SEVR"), field("TEST:T31.VAL"),
+                field("TEST:D0.SEVR"), field("TEST:D0.VAL"));
 }
 
 static int writeSetting(const char *parameter, int value, int address = 0)
@@ -67,15 +71,21 @@ static void readTC(int address, bool cached)
     std::printf("TCREAD %d %d\n", status, value);
 }
 
+static int writeDigital(const char *parameter, unsigned int value, unsigned int mask)
+{
+    return pasynUInt32DigitalSyncIO->writeOnce("DAQ", 1, value, mask, 2.0, parameter);
+}
+
 int main(int argc, char **argv)
 {
     std::setvbuf(stdout, 0, _IONBF, 0);
-    if (argc != 4) return 2;
+    if (argc != 5) return 2;
     if (dbLoadDatabase(argv[1], 0, 0)) return 3;
     if (review_registerRecordDeviceDriver(pdbbase)) return 4;
     if (MultiFunctionConfig("DAQ", argv[3], 1, 1)) return 5;
     if (dbLoadRecords(argv[2], "P=TEST:,R=T0,PORT=DAQ,ADDR=0,SCAN=I/O Intr,PREC=3")) return 6;
     if (dbLoadRecords(argv[2], "P=TEST:,R=T31,PORT=DAQ,ADDR=31,SCAN=I/O Intr,PREC=3")) return 6;
+    if (dbLoadRecords(argv[4], "P=TEST:,R=D0,PORT=DAQ,ADDR=0,MASK=1")) return 6;
     if (iocInit()) return 7;
     asynUser *port = pasynManager->createAsynUser(0, 0);
     if (pasynManager->connectDevice(port, "DAQ", -1) != asynSuccess) return 8;
@@ -83,7 +93,14 @@ int main(int argc, char **argv)
     char command[80];
     while (std::fgets(command, sizeof(command), stdin)) {
         int value;
+        unsigned int digital, mask;
         if (!std::strncmp(command, "STATE", 5)) state(port);
+        else if (std::sscanf(command, "DOUT %x %x", &digital, &mask) == 2)
+            std::printf("RESULT %d\n", writeDigital("DIGITAL_OUTPUT", digital, mask));
+        else if (std::sscanf(command, "DIR %x %x", &digital, &mask) == 2)
+            std::printf("RESULT %d\n", writeDigital("DIGITAL_DIRECTION", digital, mask));
+        else if (std::sscanf(command, "POLL %d", &value) == 1)
+            std::printf("RESULT %d\n", pasynFloat64SyncIO->writeOnce("DAQ", 0, value, 2.0, "POLL_SLEEP_MS"));
         else if (std::sscanf(command, "AUTO %d", &value) == 1)
             std::printf("RESULT %d\n", asynAutoConnect("DAQ", -1, value));
         else if (std::sscanf(command, "ENABLE %d", &value) == 1)
