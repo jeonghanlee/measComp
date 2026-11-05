@@ -77,6 +77,14 @@ silence beyond ULDAQ's receive timeout, and verifies recovery within 12 seconds
 of becoming available. Every failure must produce a disconnected port and INVALID
 input severity without replacing the last valid temperature. Restored settings
 must match the last successful writes, including conflicting bank-wide writes.
+TC-type writes include successful controls and EOF during a setting change.
+The test reads the actual asynInt32 cache immediately while disconnected, then
+compares normal SyncIO readback and the fixture's setting after reconnect.
+It repeats the sequence with a new successful value on channel 0 and also
+checks channel 31. Cache inspection uses the public interface under the port
+lock because queued I/O is rejected while disconnected; it does not replace
+any driver or library function. Every failed write must preserve the last
+successful type, both before and after recovery.
 Auto-connect is disabled for six seconds to verify that it prevents retries;
 port disable and enable must stop and resume polling. The fixture rejects
 unexpected protocol commands and requests for absent EXP-32 channels.
@@ -91,7 +99,8 @@ driver defect.
 | Mutation ID | Driver change | Expected failure |
 | --- | --- | --- |
 | `no-reconnect` | Suppress the poller's automatic connect call | Offline startup recovery deadline |
-| `no-restore` | Skip `restoreTemperatureConfig` after reconnect | `eof restores settings` |
+| `early-tc-cache` | Update the TC parameter cache before the vendor call | `TC channel 0 type 2 survives failed write` |
+| `no-restore` | Skip `restoreTemperatureConfig` after reconnect | `TC channel 0 type 2 survives failed write` |
 | `ignore-auto` | Reconnect with auto-connect disabled | `autoconnect disabled but connected` |
 | `ignore-enable` | Poll with the port disabled | `disabled port stops polling` |
 | `no-channel-limit` | Remove the no-expansion temperature-count reduction | Startup recovery or an absent EXP-32 request; not currently detected |

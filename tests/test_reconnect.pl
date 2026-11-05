@@ -149,6 +149,40 @@ sub healthy {
     });
 }
 
+sub tc_write_failures {
+    my ($run) = @_;
+    my $device = $run->{device};
+    for my $case ([0, 2, 3], [0, 4, 5], [31, 6, 7]) {
+        my ($address, $confirmed, $rejected) = @$case;
+        my $write = $address ? 'TC31' : 'TC';
+        my $name = "TC channel $address type $confirmed";
+        my $result = command($run, "$write $confirmed");
+        my $readback = command($run, "READTC $address", 'TCREAD');
+        check($run, "$name successful write", $result eq 'RESULT 0'
+            && $readback eq "TCREAD 0 $confirmed"
+            && ord(substr($device->{types}, $address, 1)) == $confirmed,
+            {result => $result, readback => $readback, device => unpack('C*', substr($device->{types}, $address, 1))});
+        my $fault_count = @{$device->{faults}};
+        $device->{fault} = [0x15, 'eof'];
+        $result = command($run, "$write $rejected");
+        my $cached = command($run, "CACHETC $address", 'TCREAD');
+        my $failed = state($run);
+        check($run, "$name write reaches transport failure", $result eq 'RESULT 3'
+            && !defined($device->{fault}) && @{$device->{faults}} == $fault_count + 1
+            && $device->{faults}[-1][0] == 0x15 && $failed->{connected} == 0,
+            {result => $result, cache => $cached, state => $failed, fault => $device->{faults}[-1]});
+        $device->{types} = chr(1) x 64;
+        $device->{online} = 1;
+        healthy($run, $device->{temperature});
+        $readback = command($run, "READTC $address", 'TCREAD');
+        my $restored = ord(substr($device->{types}, $address, 1));
+        check($run, "$name survives failed write", $cached eq "TCREAD 0 $confirmed"
+            && $readback eq "TCREAD 0 $confirmed" && $restored == $confirmed,
+            {cache_after_failure => $cached, readback_after_reconnect => $readback, device => $restored});
+    }
+    return;
+}
+
 sub reap {
     my ($run) = @_;
     return 1 if defined $run->{ioc_exit};
@@ -179,6 +213,7 @@ sub exercise {
         && $initial->{auto} == 1 && $initial->{severity} == 3, $initial);
     $device->{online} = 1;
     check($run, 'offline startup recovers', 1, healthy($run, 22.5));
+    tc_write_failures($run);
     my $result = command($run, 'TC 2');
     check($run, 'TC configuration write', $result eq 'RESULT 0', ord(substr($device->{types}, 0, 1)));
     $result = command($run, 'OTD31 0');

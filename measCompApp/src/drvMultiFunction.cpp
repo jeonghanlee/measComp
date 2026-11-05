@@ -1403,6 +1403,7 @@ int MultiFunction::restoreTemperatureConfig()
         status = ulAISetConfig(daqDeviceHandle_, AI_CFG_CHAN_TC_TYPE, addr, savedTCType_[addr]);
       #endif
       if (status) return status;
+      setIntegerParam(addr, thermocoupleType_, savedTCType_[addr]);
     }
     if (savedOpenDetect_[addr] >= 0) {
       status = setOpenThermocoupleDetect(addr, savedOpenDetect_[addr]);
@@ -1455,6 +1456,7 @@ asynStatus MultiFunction::connect(asynUser *pasynUser)
     setStringParam(lastErrorMessage_, "");
     notifyConnection(true);
     callParamCallbacks();
+    for (int addr=1; addr<numTemperatureIn_; addr++) callParamCallbacks(addr);
   }
   int state;
   pasynManager->isConnected(pasynUser, &state);
@@ -2155,7 +2157,8 @@ asynStatus MultiFunction::writeInt32(asynUser *pasynUser, epicsInt32 value)
   if (!connected_) return asynDisconnected;
 
   this->getAddress(pasynUser, &addr);
-  setIntegerParam(addr, function, value);
+  // Thermocouple readback retains the last confirmed setting on write failure.
+  if (function != thermocoupleType_) setIntegerParam(addr, function, value);
 
   bool isThermocouple = true;
   if (analogInTypeConfigurable_) {
@@ -2402,6 +2405,7 @@ asynStatus MultiFunction::writeInt32(asynUser *pasynUser, epicsInt32 value)
   }
   ULMutex.unlock();
 
+  if (!status && function == thermocoupleType_) setIntegerParam(addr, function, value);
   if (!status && addr >= 0 && addr < MAX_SIGNALS) {
     if (function == thermocoupleType_) savedTCType_[addr] = value;
     if (function == thermocoupleOpenDetect_) {

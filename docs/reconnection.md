@@ -28,7 +28,10 @@ is cleared on connection or polling recovery. It is diagnostic text, not a
 replacement for each input record's alarm status.
 
 Successful thermocouple-type and open-detection writes are reapplied when the
-device reconnects. TC32 open detection is stored per 32-channel bank, so the last
+device reconnects. Thermocouple-type readback changes only after a successful
+write. A failed write retains the previous cache value; reconnection restores
+the last successful type and keeps the cache consistent with that setting.
+TC32 open detection is stored per 32-channel bank, so the last
 successful write to any channel in a bank determines that bank's restored value.
 Temperature scale and filter remain in the driver's parameter cache.
 Writes attempted while disconnected are rejected, not queued for later replay.
@@ -67,5 +70,7 @@ The [reconnect test](../tests/README.md) runs the real MultiFunction driver, asy
 ULDAQ and EPICS temperature template against an external UDP/TCP TC32 fixture.
 It covers offline startup, EOF, incomplete headers, receive timeout, connection
 policy, invalid input alarms, last-value retention and configuration restoration.
+TC-type write failures are checked immediately through the public asynInt32
+cache read interface and after reconnect through normal asynInt32 SyncIO reads.
 The fixture represents a TC32 without EXP-32. Real hardware power cycling,
 EXP-32, USB, Windows and other supported models require separate verification.

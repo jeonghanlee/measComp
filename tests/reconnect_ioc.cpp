@@ -2,6 +2,7 @@
 #include <cstring>
 #include <cmath>
 #include <asynDriver.h>
+#include <asynInt32.h>
 #include <asynInt32SyncIO.h>
 #include <asynShellCommands.h>
 #include <dbAccess.h>
@@ -42,6 +43,30 @@ static int writeSetting(const char *parameter, int value, int address = 0)
     return status;
 }
 
+static void readTC(int address, bool cached)
+{
+    asynUser *user = 0;
+    epicsInt32 value = -1;
+    asynStatus status = pasynInt32SyncIO->connect("DAQ", address, &user, "THERMOCOUPLE_TYPE");
+    if (status == asynSuccess) {
+        if (cached) {
+            // Inspect the real cache while the disconnected port rejects queued I/O.
+            asynInterface *interface = pasynManager->findInterface(user, asynInt32Type, 1);
+            status = interface ? pasynManager->lockPort(user) : asynError;
+            if (status == asynSuccess) {
+                asynInt32 *int32 = static_cast<asynInt32 *>(interface->pinterface);
+                status = int32->read(interface->drvPvt, user, &value);
+                asynStatus unlocked = pasynManager->unlockPort(user);
+                if (unlocked != asynSuccess) status = unlocked;
+            }
+        } else {
+            status = pasynInt32SyncIO->read(user, &value, 2.0);
+        }
+    }
+    if (user) pasynInt32SyncIO->disconnect(user);
+    std::printf("TCREAD %d %d\n", status, value);
+}
+
 int main(int argc, char **argv)
 {
     std::setvbuf(stdout, 0, _IONBF, 0);
@@ -63,6 +88,12 @@ int main(int argc, char **argv)
             std::printf("RESULT %d\n", asynAutoConnect("DAQ", -1, value));
         else if (std::sscanf(command, "ENABLE %d", &value) == 1)
             std::printf("RESULT %d\n", asynEnable("DAQ", -1, value));
+        else if (std::sscanf(command, "READTC %d", &value) == 1)
+            readTC(value, false);
+        else if (std::sscanf(command, "CACHETC %d", &value) == 1)
+            readTC(value, true);
+        else if (std::sscanf(command, "TC31 %d", &value) == 1)
+            std::printf("RESULT %d\n", writeSetting("THERMOCOUPLE_TYPE", value, 31));
         else if (std::sscanf(command, "TC %d", &value) == 1)
             std::printf("RESULT %d\n", writeSetting("THERMOCOUPLE_TYPE", value));
         else if (std::sscanf(command, "OTD31 %d", &value) == 1)
