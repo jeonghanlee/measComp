@@ -45,6 +45,24 @@ If the IOC starts offline, reapply its output configuration after connection;
 failed startup PINI writes are not automatically replayed. Waveform acquisition
 and generation are marked stopped; output commands are not automatically replayed.
 
+## Analog enum initialization
+
+After a successful connection, the poller publishes model-specific enum labels,
+values and severities to every registered driver address. Publication waits until
+IOC record initialization is complete, because asyn ignores enum callbacks while
+`interruptAccept` is zero. Reconnection publishes the enums again.
+
+The analog-input, voltage-input and analog-output templates define an initial
+`Unavailable` state for their dynamic mbbo enums. This makes Base initialize
+`SDEF=1` even when the device is offline. The model-specific enum replaces that
+initial label after connection, and selecting an item then writes its numeric
+enum value instead of its menu index. Custom mbbo templates using these dynamic
+enums also need a nonempty initial state label with asyn 4.45.
+
+Enum updates do not process output records or replay failed startup writes.
+Reapply configuration after an offline start as described above. ADC conversion
+coefficients are separate from enum metadata and selection conversion.
+
 ## Linux vendor dependency
 
 Linux builds require ULDAQ 1.2.2 with the TCP receive patch maintained by
@@ -81,5 +99,12 @@ TC-type write failures are checked immediately through the public asynInt32
 cache read interface and after reconnect through normal asynInt32 SyncIO reads.
 Digital cases cover full-port write EOF, a non-final bit timeout, non-transport
 errors, input alarms and last values before another poll, and recovery controls.
-The fixture represents a TC32 without EXP-32. Real hardware power cycling,
-EXP-32, USB, Windows and other supported models require separate verification.
+The TC32 fixture represents a device without EXP-32. Separate enum cases load
+the shipped analog templates with TC32 metadata and an E-1608 protocol fixture.
+They compare every enum state and actual record selection with public driver
+readback after online startup, offline startup and reconnect. An E-1608 case
+also connects while IOC record initialization is complete but enum callbacks
+are still disabled.
+Real hardware power cycling, ADC engineering-unit conversion, analog output
+voltage, scan acquisition, EXP-32, USB, Windows and other models require
+separate verification.

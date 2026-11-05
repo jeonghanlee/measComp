@@ -14,5 +14,7 @@ record(mbbo,"$(P)$(R)Range")
     field(PINI, "YES")
     field(DTYP, "asynInt32")
     field(OUT,  "@asyn($(PORT),$(ADDR))VOLTAGE_IN_RANGE")
+    # A defined state enables enum conversion even when initialization is offline.
+    field(ZRST, "Unavailable")
     field(VAL,  "$(RANGE)")
 }

@@ -14,8 +14,10 @@
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
+#include <vector>
 
 #include <iocsh.h>
+#include <dbAccess.h>
 #include <epicsThread.h>
 #include <epicsString.h>
 #include <epicsMath.h>
@@ -732,11 +734,14 @@ private:
   asynUser *portUser_;
   bool initialized_;
   bool connected_;
+  bool enumCallbacksPending_;
   epicsUInt64 lastConnectAttempt_;
   int savedTCType_[MAX_SIGNALS];
   int savedOpenDetect_[MAX_SIGNALS];
   int initializeDevice();
   int restoreTemperatureConfig();
+  asynStatus getEnums(int function, const enumStruct_t *&pEnum, int &numEnums);
+  void publishEnums();
   void setInputStatus(asynStatus status);
   void notifyConnection(bool connected);
   bool isConnectionError(int status);
@@ -850,6 +855,7 @@ MultiFunction::MultiFunction(const char *portName, const char *uniqueID, int max
   pasynManager->connectDevice(portUser_, portName, -1);
   initialized_ = false;
   connected_ = false;
+  enumCallbacksPending_ = false;
   lastConnectAttempt_ = 0;
   boardType_ = boardFamily_ = 0;
   boardName_[0] = '\0';
@@ -1451,6 +1457,7 @@ asynStatus MultiFunction::connect(asynUser *pasynUser)
       return asynDisconnected;
     }
     connected_ = true;
+    enumCallbacksPending_ = true;
     for (int i=0; i<MAX_IO_PORTS; i++) forceCallback_[i] = 1;
     ULMutex.unlock();
     setStringParam(lastErrorMessage_, "");
@@ -2759,14 +2766,9 @@ asynStatus MultiFunction::writeFloat32Array(asynUser *pasynUser, epicsFloat32 *v
   return asynSuccess;
 }
 
-asynStatus MultiFunction::readEnum(asynUser *pasynUser, char *strings[], int values[], int severities[], size_t nElements, size_t *nIn)
+asynStatus MultiFunction::getEnums(int function, const enumStruct_t *&pEnum, int &numEnums)
 {
-  int function = pasynUser->reason;
-  int i;
-  const enumStruct_t *pEnum;
-  int numEnums;
-  //static const char *functionName = "readEnum";
-  if (!pBoardEnums_) { *nIn = 0; return asynDisconnected; }
+  if (!pBoardEnums_) return asynDisconnected;
 
   if (function == analogInRange_) {
     pEnum    = pBoardEnums_->pInputRange;
@@ -2795,9 +2797,17 @@ asynStatus MultiFunction::readEnum(asynUser *pasynUser, char *strings[], int val
     numEnums = sizeof(temperatureWiringUSB_TEMP)/sizeof(enumStruct_t);
   }
   else {
-      *nIn = 0;
       return asynError;
   }
+  return asynSuccess;
+}
+
+asynStatus MultiFunction::readEnum(asynUser *pasynUser, char *strings[], int values[], int severities[], size_t nElements, size_t *nIn)
+{
+  const enumStruct_t *pEnum;
+  int numEnums, i;
+  asynStatus status = getEnums(pasynUser->reason, pEnum, numEnums);
+  if (status != asynSuccess) { *nIn = 0; return status; }
   for (i=0; ((i<numEnums) && (i<(int)nElements)); i++) {
     if (strings[i]) free(strings[i]);
     strings[i] = epicsStrDup(pEnum[i].enumString);
@@ -2806,6 +2816,25 @@ asynStatus MultiFunction::readEnum(asynUser *pasynUser, char *strings[], int val
   }
   *nIn = i;
   return asynSuccess;
+}
+
+void MultiFunction::publishEnums()
+{
+  int functions[] = {analogInRange_, voltageInRange_, analogOutRange_, analogInType_,
+                     temperatureSensor_, temperatureWiring_};
+  for (size_t function=0; function<sizeof(functions)/sizeof(functions[0]); function++) {
+    const enumStruct_t *pEnum;
+    int numEnums;
+    if (getEnums(functions[function], pEnum, numEnums) != asynSuccess || numEnums == 0) continue;
+    std::vector<char *> strings(numEnums);
+    std::vector<int> values(numEnums), severities(numEnums, 0);
+    for (int i=0; i<numEnums; i++) {
+      strings[i] = pEnum[i].enumString;
+      values[i] = pEnum[i].enumValue;
+    }
+    for (int addr=0; addr<MAX_SIGNALS; addr++)
+      doCallbacksEnum(&strings[0], &values[0], &severities[0], numEnums, functions[function], addr);
+  }
 }
 
 void MultiFunction::pollerThread()
@@ -2836,6 +2865,11 @@ void MultiFunction::pollerThread()
       unlock();
       epicsThreadSleep(0.1);
       continue;
+    }
+    // Device support ignores enum callbacks until record initialization is complete.
+    if (enumCallbacksPending_ && interruptAccept) {
+      publishEnums();
+      enumCallbacksPending_ = false;
     }
     int inputStatus = 0;
     ULMutex.lock();

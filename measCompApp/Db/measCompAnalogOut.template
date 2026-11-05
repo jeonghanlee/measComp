@@ -22,6 +22,8 @@ record(mbbo,"$(P)$(R)Range")
     field(PINI, "YES")
     field(DTYP, "asynInt32")
     field(OUT,  "@asyn($(PORT),$(ADDR))ANALOG_OUT_RANGE")
+    # A defined state enables enum conversion even when initialization is offline.
+    field(ZRST, "Unavailable")
 }
 
 record(ao,"$(P)$(R)Return") {

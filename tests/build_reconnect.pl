@@ -120,7 +120,11 @@ sub main {
     my @members = (@sources, "$repository/measCompApp/src/measCompDiscover.h",
         "$repository/measCompApp/Db/measCompTemperatureIn.template",
         "$repository/measCompApp/Db/measCompBinaryIn.template",
+        "$repository/measCompApp/Db/measCompAnalogIn.template",
+        "$repository/measCompApp/Db/measCompVoltageIn.template",
+        "$repository/measCompApp/Db/measCompAnalogOut.template",
         "$RealBin/test_reconnect.pl", "$RealBin/TC32.pm", "$RealBin/build_reconnect.pl",
+        "$RealBin/E1608.pm",
         "$asyn/include/asynDriver.h", "$include/uldaq.h", "$library/libuldaq.so");
     my %hashes;
     for my $path (@members) {

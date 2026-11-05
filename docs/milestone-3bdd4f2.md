@@ -8,19 +8,19 @@ Git upstream: origin/site
 Remote tracker: [jeonghanlee/measComp milestone 1](https://github.com/jeonghanlee/measComp/milestone/1)
 GitHub milestone: Connection recovery and device selection
 Due date: none
-Remote milestone observed at: 2026-11-05T19:00:53Z; state: open; one closed issue and five open issues
+Remote milestone observed at: 2026-11-05T20:38:24Z; state: open; two closed issues and four open issues
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/1`.
 Baseline commit: 3bdd4f24d820579f3f423c7be968baf2bb413950
 
-Next session entry point: Prepare M2's verified and reviewed working-tree changes for commit, push and issue #3 reconciliation under the corresponding authorizations. M1 is complete; M3 through M6 await separate implementation.
+Next session entry point: M3 implementation, verification and local review are accepted. Prepare its commit when requested; commit, push and issue #4 updates require their separate workflow steps. M1 and M2 are complete; M4 through M6 still require plan acceptance and implementation authorization.
 
 ## Scope
 
-This document assigns issues #2 through #7 to six work units for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. M1 is complete. M2 is accepted and authorized for implementation; M3 through M6 remain draft plans.
+This document assigns issues #2 through #7 to six work units for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. M1 and M2 are complete; M3 is in progress; M4 through M6 remain draft plans.
 
 The common integration environment is Linux with the real measComp driver, EPICS Base 7.0.10, asyn 4.45 and patched ULDAQ 1.2.2. Extend the shipped Perl/Bash tests and retain `tests/reconnect_ioc.cpp`; use external device protocol fixtures, without replacing internal driver, asyn or ULDAQ functions. Record the source commit, dependency identities, assertions, fixture requests and native IOC exit status for each executed check. Checks reproducing a defect must fail for the intended assertion on the affected baseline and pass on the fixed code; setup and build failures do not establish a regression. Compatibility checks and positive controls must pass on both the baseline and fixed code. When a check combines these purposes, record the defect assertion separately from its controls.
 
-Existing failure observations below come from the linked issues at the baseline commit. They are not successful verification of a fix. M1 and M2 record observed post-fix verification; checks for M3 through M6 remain pending. M2 still requires repository landing and issue closure. The analog metadata findings are separate from the normal floating-point TC32 temperature path. MAC rediscovery and same-IP/different-discovery-port selection retain their specific applicability conditions.
+Existing failure observations below come from the linked issues at the baseline commit. They are not successful verification of a fix. M1 and M2 record observed post-fix verification, repository landing and linked-issue closure. M3 records passing enum metadata and record-selection verification; its repository landing and issue closure remain pending. M4 through M6 remain pending. The analog metadata findings are separate from the normal floating-point TC32 temperature path. MAC rediscovery and same-IP/different-discovery-port selection retain their specific applicability conditions.
 
 **Out of scope:** ULDAQ vendor patch development, upstream submissions, release numbering, tags, deployment, output-command replay, and a general qualification of Windows, USB, EXP-32 or hardware power cycling. Changes to `docs/reconnection.md` and `tests/README.md` belong to the affected work unit when behavior or test invocation changes. Existing test limitations remain explicit.
 
@@ -31,13 +31,13 @@ Existing failure observations below come from the linked issues at the baseline 
 | ID | Work unit | Type | Status | Ready | Deps | Done when / Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | M1 | TC write and readback consistency | Milestone | Complete | No | | Device and cache agree after a failed write and reconnect; [detail](#m1---tc-write-and-readback-consistency) |
-| M2 | Digital output failure handling | Milestone | In progress | No | | Transport errors disconnect and invalidate inputs before the next poll; [detail](#m2---digital-output-failure-handling) |
-| M3 | Analog enum initialization | Milestone | Not started | Yes | | Offline-start records obtain the same enums as online-start records; [detail](#m3---analog-enum-initialization) |
+| M2 | Digital output failure handling | Milestone | Complete | No | | Transport errors disconnect and invalidate inputs before the next poll; [detail](#m2---digital-output-failure-handling) |
+| M3 | Analog enum initialization | Milestone | In progress | No | | Offline-start records obtain the same enums as online-start records; [detail](#m3---analog-enum-initialization) |
 | M4 | Analog conversion initialization | Milestone | Not started | Yes | | Offline-start conversion matches online-start conversion and measured raw values; [detail](#m4---analog-conversion-initialization) |
 | M5 | MAC device rediscovery | Milestone | Not started | Yes | | An initially absent MAC-selected device connects without disturbing existing ports; [detail](#m5---mac-device-rediscovery) |
 | M6 | Discovery endpoint identity | Milestone | Not started | Yes | | Devices sharing an IP but using different discovery ports remain independent; [detail](#m6---discovery-endpoint-identity) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: one Complete, one In progress and four Not started. `Ready` records dependency readiness only; the remaining draft plans still require acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
+The row order follows issue numbers and imposes no execution dependency. Current status: two Complete, one In progress and three Not started. `Ready` records dependency readiness only; the remaining draft plans still require acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
 
 ### Milestone Details
 
@@ -131,7 +131,7 @@ Recheck metadata with `gh issue view 2 --repo jeonghanlee/measComp --json state,
 Origin: 3bdd4f2 / M2
 Identity History: none
 GitHub Issue: [#3](https://github.com/jeonghanlee/measComp/issues/3)
-Status: In progress
+Status: Complete
 
 ##### Summary
 
@@ -207,7 +207,9 @@ Perl syntax, POD and CLI checks passed on Debian 13 / Perl 5.40.1 and the existi
 
 ##### Closure Evidence
 
-- The working-tree implementation and T1-T4 are verified. M2 remains In progress until its repository changes are committed and observed on `origin/site`, and issue #3 is observed closed. No external completion condition is waived.
+- The implementation and T1-T4 are verified in 5ee7103001a907d03f7354805a911b064e2749db. Repository landing and linked-issue closure are observed below; no completion condition is waived.
+- Remote landing observed at 2026-11-05T20:38:24Z: after fetching `origin`, `origin/site` was 5ee7103001a907d03f7354805a911b064e2749db, matching local HEAD. The committed diff matches the reviewed eight-file selection. Comparing the driver, tests and reconnection documentation between the fix commit and `origin/site` produced no differences. Recheck with `git fetch origin`, `git rev-parse HEAD origin/site` and `git diff 5ee7103 origin/site -- measCompApp/src/drvMultiFunction.cpp tests docs/reconnection.md`.
+- Issue #3 was observed closed with reason `completed` at 2026-11-05T20:38:24Z; GitHub recorded closure at 2026-11-05T20:37:58Z. Its body matches the verified implementation, all five acceptance items are checked, and the result comment is https://github.com/jeonghanlee/measComp/issues/3#issuecomment-6668705283.
 - Review acceptance: 2026-11-05; four direct self-review passes (first-person, third-person, second-person, second-person recheck), no delegated review. The reader pass found a missing `TEMPLATE` definition after leaving the earlier namespace; the digital instructions now establish it explicitly. Commands extracted directly from the corrected README passed all 55 digital checks with normal IOC exits and shell exit 0; evidence is `work/m2-digital/readme-digital.stdout`, `readme-digital.stderr` and `fixed-final/{word,control,policy,bits}.log.json`. The third-person pass rechecked request order, connection identity and recorded response frames/checksums. No unresolved in-scope finding remains.
 
 ##### GitHub Projection
@@ -215,10 +217,10 @@ Perl syntax, POD and CLI checks passed on Debian 13 / Perl 5.40.1 and the existi
 Title: Disconnect on digital output transport errors
 Labels: bug
 GitHub Milestone: Connection recovery and device selection
-Observed State: open
+Observed State: closed
 Observed Labels: bug
 Observed Milestone: Connection recovery and device selection (milestone 1)
-Last Compared: 2026-11-05T18:05:51Z; remote updated at 2026-11-05T18:05:13Z
+Last Compared: 2026-11-05T20:38:24Z; remote updated at 2026-11-05T20:37:58Z
 
 Recheck metadata with `gh issue view 3 --repo jeonghanlee/measComp --json state,labels,milestone,updatedAt`.
 
@@ -227,7 +229,7 @@ Recheck metadata with `gh issue view 3 --repo jeonghanlee/measComp --json state,
 Origin: 3bdd4f2 / M3
 Identity History: none
 GitHub Issue: [#4](https://github.com/jeonghanlee/measComp/issues/4)
-Status: Not started
+Status: In progress
 
 ##### Summary
 
@@ -235,7 +237,7 @@ Analog records initialized offline can retain empty enum labels and wrong values
 
 ##### Scope
 
-Publish valid model-specific dynamic enums to records after successful initialization, including direct-IP offline startup. Cover the shipped `measCompApp/Db/measCompAnalogIn.template` and a supported analog model through an external protocol fixture.
+Publish valid model-specific dynamic enums to records after successful initialization, including direct-IP offline startup. Initialize the shipped analog input, voltage input and analog output mbbo templates so record selection converts through the enum values after recovery. Cover the shipped `measCompApp/Db/measCompAnalogIn.template` and a supported analog model through an external protocol fixture.
 
 Out of scope: treating the TC32 floating-point temperature template as an analog enum consumer, changing enum definitions, and general qualification of every supported device model.
 
@@ -243,6 +245,7 @@ Out of scope: treating the TC32 floating-point temperature template as an analog
 
 - Offline-start records receive their applicable enum labels and values when device initialization succeeds.
 - Offline-then-online and online-start records expose the same model-specific enums.
+- Each applicable enum selection reaches the driver as its model-specific numeric value after offline startup and reconnect.
 - Coverage includes the shipped analog template and a supported analog model, without assuming that TC32 temperature records use this template.
 - All local checks pass with durable evidence.
 - The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
@@ -253,14 +256,15 @@ Out of scope: treating the TC32 floating-point temperature template as an analog
 
 ##### Implementation Plan
 
-Plan Status: draft
-Plan Acceptance: none
-Implementation Authorization: none
+Plan Status: accepted
+Plan Acceptance: 2026-11-05; include template initialization and actual selection-write verification in M3 (option 1).
+Implementation Authorization: 2026-11-05; implement and verify the accepted M3 scope including SDEF initialization. Commit, push and issue changes remain separate operations.
 Superseded Plan Artifacts: none
 
 1. Enumerate the model-specific enum parameters and record addresses populated by successful device initialization.
-2. Publish asyn enum callbacks after the enum table becomes valid, using the same strings, values and severities as `readEnum()`.
-3. Extend the external protocol fixtures and IOC test configuration to load the shipped analog template for a supported analog model; compare record fields with the public driver enums.
+2. Share enum selection with `readEnum()` and publish callbacks for every driver address after successful connection and IOC initialization. Keep the enum definitions unchanged; defer publication while `interruptAccept` is false.
+3. Extend the external protocol fixtures and IOC test configuration for E-1608. Load the shipped analog input, voltage input and analog output templates and compare record fields with public driver enums and independently specified model values.
+4. Give each affected mbbo a nonempty initial state label so Base initializes SDEF before connection. Verify every supported selection through real record processing, then compare RVAL, SDEF, completion/alarm state and public asynInt32 readback. Repeat across both startup orders and reconnects. An otherwise fixed build using the original templates must fail this check.
 
 ##### Test Plan
 
@@ -269,18 +273,41 @@ Superseded Plan Artifacts: none
 | T1 | Integration | Repeat online startup and offline-then-online startup with the shipped analog template and TC32 metadata reproduction. | Common integration environment; TC32 fixture | Both runs expose `TC deg.` with enum value `2` in the driver and record fields. |
 | T2 | Integration | Run both startup orders for a supported analog model and inspect each applicable dynamic enum through the shipped template. | Common integration environment; supported analog-model protocol fixture | Record strings, numeric values and severities match the driver for the selected model in both startup orders. |
 | T3 | Regression | Repeat disconnect and reconnect, then run the normal TC32 temperature suite. | Common integration environment | Enum values remain valid across recovery; the separate temperature path retains its existing behavior. |
+| T4 | Integration | Write each supported index through the actual mbbo VAL field, await asynchronous completion, and inspect RVAL, SDEF, severity and public driver readback. Test all loaded addresses and startup cases, including after each reconnect. | Common integration environment; TC32 metadata and E-1608 fixtures | SDEF is 1 and each index maps to its specified numeric value. Original templates with the fixed driver fail after offline startup. |
+
+Execution contract: use the real driver, asyn 4.45.0, EPICS Base 7.0.10 and patched ULDAQ 1.2.2, with only the UDP/TCP device boundary simulated. Retain build inputs, commands, complete IOC output, assertion JSON, protocol requests, faults and native statuses under `work/m3-enums/`. Perl syntax and CLI must remain compatible with Perl 5.26.3 on the prepared Rocky 8 image; integration runs on Debian 13 with Perl 5.40.1.
+
+- Volume: each fresh IOC serves bounded enum snapshots (all 16 record states), with no record truncation or sampling. This is functional verification, not a sustained-load or retention claim.
+- Expected values: TC32 type is `TC deg.` / `2`; E-1608 input ranges are `+= 10V`, `+= 5V`, `+= 2V`, `+= 1V` / `1, 0, 14, 4`, output range is `+= 10V` / `1`, and input type is `Volts` / `1`. All enum severities are zero. Check address zero and nonzero addresses, including the final supported input channel.
+- Time: use monotonic 12-second recovery deadlines and UTC run bounds. Each case has its own IOC and device lifetime; no cross-lifetime counter deltas.
+- Faults: offline startup must be observed disconnected before enabling device responses. For recovery, inject EOF on an actual digital-input request, observe disconnection, then restore responses. Fixture traffic must prove exposure.
+- Measurement: compare complete enum strings, values and state severities with the model specification and public `readEnum()` result. Write every supported selection through `dbPutField()` and check asynchronous completion, record raw value and public asynInt32 readback. Acquisition conversion coefficients belong to M4, not this check.
+- Source identity: retain all compiled sources, test scripts/modules, loaded templates, generated database and linked library identities. A baseline build uses the real pre-fix driver with the same test bytes; each offline baseline must fail at a record enum assertion while online controls pass.
+- Coverage: TC32 and E-1608, online and offline startup, E-1608 connection after record initialization but before interrupt acceptance, two subsequent reconnects, normal finish, missing-template failure and TERM cleanup. Also repeat the existing TC32 and digital regression cases. Verify the test's own cleanup without an outer cleanup guard and with a live-process/socket positive control. Portable evidence transfer, offline replay and two-stage terminal persistence are not part of this runner's contract.
 
 ##### Verification Results
 
 | Label | Observed At | Environment | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| T1 | Not run | Common integration environment | Pending | None |
-| T2 | Not run | Common integration environment | Pending | None |
-| T3 | Not run | Common integration environment | Pending | None |
+| T1 | 2026-11-05T22:03:51Z to 22:04:07Z | Debian 13; real IOC, Base 7.0.10, asyn 4.45.0, patched ULDAQ 1.2.2; TC32 fixture | Passed: 55 online and 56 offline assertions, including metadata, actual selections and two reconnects per case. The baseline driver passes online and fails offline at the record range enum assertion while its public driver enum assertion passes. | `work/m3-enums/selection-fixed/enum-tc32-*.log.json`; `work/m3-enums/negative-v2/baseline/build/` |
+| T2 | 2026-11-05T22:03:51Z to 22:04:07Z | Same libraries; E-1608 fixture; shipped analog input, voltage input and analog output templates | Passed: 175 online, 176 offline and 178 initialization-overlap assertions. The baseline driver passes online; offline and overlap fail at the record range enum assertion. | `work/m3-enums/selection-fixed/enum-e1608-*.log.json`; `work/m3-enums/negative-v2/baseline/build/` |
+| T3 | 2026-11-05T22:03:51Z to 22:05:46Z | Same libraries; independent IOC/fixture per case | Passed: all five enum cases preserve metadata and selection conversion through two observed EOF/disconnect/reconnect cycles each. Existing reconnect 38 and digital word/control/policy/bits 11/12/17/15 assertions pass, with normal IOC exits and no unsupported fixture commands. | `work/m3-enums/selection-fixed/`; per-case output, status, UTC bounds and source hashes |
+| T4 | 2026-11-05T22:03:51Z to 22:04:07Z | Same libraries and shipped templates; TC32 metadata and E-1608 fixtures | Passed: every supported index on every loaded enum record reaches the driver as its expected numeric value, with SDEF=1, PACT=0 and no record alarm. Original templates with the fixed driver pass online but fail offline at the first selection check. | `work/m3-enums/selection-fixed/`; `work/m3-enums/negative-v2/template/build/` |
+
+The ten final cases passed 733 assertions, including 640 in the five enum cases. T4 is included in those counts, not added again. The fixed build's 17 recorded input hashes and the retained source/template/binary checksums were rechecked unchanged after execution. Driver SHA-256: `cfdd7bf9fa168a9af7b43f2775141b80af229b818008bc6bc3ddf4012321b32d`; runner: `f54c6f1fdce29c5a5c99f733781be5da8d8d8d25a07c0f35a9c888d25d4041ea`; IOC source: `6799683a33e6c691952be06795c1e5ef16b7bf523933754c49449cdcacbb2520`. Build commands, input hashes and runtime library resolution are retained in `work/m3-enums/selection-fixed/`, `selection-proof.sha256` and `selection-libraries.txt`. The baseline uses the real driver from `5ee7103001a907d03f7354805a911b064e2749db` with the final test bytes.
+
+Final negative controls returned status 1 at their intended assertions: address-zero-only publication at `startup TEST:A7Range record enums`, publication before interrupt acceptance at `startup TEST:A0Range record enums`, and original templates at `startup TEST:A0Range selection 0 maps to 1` for E-1608 and `selection 0 maps to 0` for TC32 (SDEF remains zero). See `work/m3-enums/negative-v2/`. A separate scratch runner that skipped successful checks failed at `startup enum target coverage`; its evidence and the predeclared mutation table are under `work/m3-enums/`. The earlier `baseline-init/` and `fixed/` runs omit successful enum assertions because of that runner defect; they are excluded from acceptance evidence.
+
+Final Perl 5.26.3 syntax, POD, module loading and CLI checks passed in the prepared Rocky 8 image `sha256:507b995d50e4fee989c55b3fcbbfd7da3d9dc57a469ec771739cd6f399f967c9`; see `work/m3-enums/selection-rocky8.txt`. Missing-template and TERM runs returned runner statuses 1 and 143 with IOC statuses 6 and -15. Live child and listening-socket positive controls were observed before each failure; neither remained afterward, without a cleanup guard. See `work/m3-enums/selection-lifecycle.txt` and the `selection-fixed/lifecycle-*` evidence.
+
+SDEF premise: the diagnostic at 2026-11-05T21:08:29Z to 21:08:40Z observed selection `2` produce `RVAL=14` online and `RVAL=2` offline with the original templates. asyn 4.45 copies enum fields without recomputing SDEF. The accepted template initialization resolves that record-selection defect, as verified by T4; it does not address M4's ADC conversion slope. Diagnostic evidence and primary sources remain under `work/m3-enums/selection-probe/` and `work/m3-enums/reference/`.
+
+Documentation execution: from 2026-11-05T22:13:40Z to 22:14:50Z, the namespace setup and all five enum commands extracted from `tests/README.md` ran sequentially in one fresh namespace against the same fixed build. All 640 assertions passed, including 204 actual selections and two observed faults per case; all five IOCs and the command sequence exited 0. This repeats the enum verification and is not added to the 733-assertion acceptance total. Retained evidence: `work/m3-enums/readme-enums.*` and `selection-fixed/{t-online,t-offline,e-online,e-offline,e-init}.log*`. The README, extracted commands and source/template/binary checksums were unchanged after execution.
 
 ##### Closure Evidence
 
-- None. No fix or successful post-fix verification is recorded.
+- Local review accepted on 2026-11-05 after first-person, third-person and second-person self-review: three direct passes in the available records, none delegated. The third-person pass checked the complete M3 change against its accepted plan, primary record/callback sources, retained negative controls and a fresh execution of the documented commands. The second-person pass checked the changed test guide, reconnection documentation and M3 detail against actual outputs. No unresolved findings remain; termination condition: no finding above the severity floor.
+- Enum publication, initial template states and selection-write regression are implemented locally and pass the recorded checks. Commit, remote landing and linked-issue update remain pending; M3 stays In progress until closure evidence is complete.
 
 ##### GitHub Projection
 

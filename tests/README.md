@@ -1,9 +1,9 @@
-# TC32 reconnect test
+# MultiFunction reconnect tests
 
 The test compiles the repository's MultiFunction driver and device discovery
 code, links real EPICS/asyn/ULDAQ libraries, and loads the shipped
-`measCompTemperatureIn.template` and `measCompBinaryIn.template`. Only the external TC32 UDP/TCP transport is
-simulated. Internal driver and library functions are not replaced.
+temperature, binary-input and analog templates. External TC32 and E-1608
+UDP/TCP devices are simulated; internal driver and library functions run unchanged.
 
 ## Prerequisites
 
@@ -69,9 +69,10 @@ on handled failures and interruptions.
 `build_reconnect.pl` generates the database definition and registrar and compiles
 the IOC. `test_reconnect.pl` controls the IOC through pipes and evaluates its
 output. `TC32.pm` serves the external device protocol through a nonblocking
-socket event loop while the test waits for IOC responses.
+socket event loop while the test waits for IOC responses. `E1608.pm` uses the
+same Ethernet framing with E-1608 discovery, calibration-memory and I/O payloads.
 
-The fixture starts offline, then becomes available. It sends a valid 22.5 C
+The default `reconnect` fixture starts offline, then becomes available. It sends a valid 22.5 C
 baseline, tests EOF during the final temperature channel, a short digital-input response and
 silence beyond ULDAQ's receive timeout, and verifies recovery within 12 seconds
 of becoming available. Every failure must produce a disconnected port and INVALID
@@ -123,14 +124,54 @@ Digital fault assertions compare the same temperature and binary-input values
 before failure, while INVALID, and after recovery. They do not verify output
 replay or rollback of earlier successful bit writes.
 
+## Analog enum cases
+
+Repeat the namespace setup above, then run these commands in that shell with
+the existing `BUILD`. Each case starts a fresh IOC and device fixture.
+
+```bash
+export TEMPLATE="$PWD/measCompApp/Db/measCompAnalogIn.template"
+export IOC="$BUILD/reconnect-ioc"
+export DBD="$BUILD/reconnect.dbd"
+export RUNNER="$PWD/tests/test_reconnect.pl"
+timeout 90s perl "$RUNNER" --case enum-tc32-online "$IOC" "$DBD" "$TEMPLATE" "$BUILD/t-online.log"
+timeout 90s perl "$RUNNER" --case enum-tc32-offline "$IOC" "$DBD" "$TEMPLATE" "$BUILD/t-offline.log"
+timeout 90s perl "$RUNNER" --case enum-e1608-online "$IOC" "$DBD" "$TEMPLATE" "$BUILD/e-online.log"
+timeout 90s perl "$RUNNER" --case enum-e1608-offline "$IOC" "$DBD" "$TEMPLATE" "$BUILD/e-offline.log"
+timeout 90s perl "$RUNNER" --case enum-e1608-init "$IOC" "$DBD" "$TEMPLATE" "$BUILD/e-init.log"
+exit
+```
+
+TC32 cases load the shipped analog-input template at addresses 0 and 31 to
+exercise enum metadata; normal TC32 temperature acquisition uses its separate
+floating-point template. E-1608 cases load analog-input and voltage-input
+templates at addresses 0 and 7, and analog-output templates at addresses 0 and 1.
+The voltage-input and analog-output templates must be beside `TEMPLATE`.
+
+Every case compares all 16 record enum states with public `readEnum()` results
+and the model's specified strings, values and severities. It writes each
+supported selection through the record's `VAL`, waits for asynchronous processing
+to finish, and checks `RVAL`, `SDEF=1`, alarm severity and public asynInt32
+readback. The same checks run after two observed EOF/disconnect/reconnect cycles.
+Each phase also checks its number of inspected records so a partial pass cannot
+silently omit the remaining targets.
+
+Online cases make the device available before driver construction. Offline cases
+observe a disconnected IOC before enabling responses. The `init` case holds
+IOC initialization after record initialization, enables the device, observes
+real polling while `interruptAccept=0`, and then completes IOC initialization.
+This verifies deferred enum delivery through the actual asyn device support.
+These cases establish enum metadata and selection conversion, not ADC
+engineering-unit conversion, analog output voltage or scan acquisition.
+
 ## Negative controls
 
-Apply each change separately to a scratch copy of the actual driver, rebuild
+Apply each change separately to a scratch copy of the named source, rebuild
 with `build_reconnect.pl`, and run the complete test. A failure counts only at
 the expected assertion or deadline; a build or setup failure is not a detected
 driver defect.
 
-| Mutation ID | Driver change | Expected failure |
+| Mutation ID | Source change | Expected failure |
 | --- | --- | --- |
 | `no-reconnect` | Suppress the poller's automatic connect call | Offline startup recovery deadline |
 | `early-tc-cache` | Update the TC parameter cache before the vendor call | `TC channel 0 type 2 survives failed write` |
@@ -141,6 +182,10 @@ driver defect.
 | `no-digital-disconnect` | Omit the connection-error transition in `writeUInt32Digital` | `digital word error disconnects immediately` in `digital-word` |
 | `overwrite-bit-error` | Remove the output bit loop's first-error break | `digital bit write preserves transport error` in `digital-bits` |
 | `disconnect-any-error` | Disconnect on every digital vendor error | `digital non-transport error keeps connection` in `digital-control` |
+| `no-enum-callback` | Omit enum publication | `startup TEST:A0Range record enums` in an offline enum case |
+| `enum-address-zero` | Publish enums only at address 0 | `startup TEST:A7Range record enums` in `enum-e1608-offline` |
+| `early-enum-callback` | Publish before `interruptAccept` without deferring | `startup TEST:A0Range record enums` in `enum-e1608-init` |
+| `no-initial-enum` | Remove the initial `Unavailable` labels from the templates | `startup TEST:A0Range selection 0 maps to 1` in `enum-e1608-offline` |
 
 This test does not establish hardware power-cycle behavior, sustained network
 loss endurance, Channel Access client reconnection, EXP-32, USB or Windows support.

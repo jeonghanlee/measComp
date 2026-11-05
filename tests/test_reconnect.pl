@@ -16,6 +16,7 @@ use POSIX qw(WNOHANG);
 use Scalar::Util qw(looks_like_number);
 use Time::HiRes qw(clock_gettime CLOCK_MONOTONIC sleep);
 use TC32;
+use E1608;
 
 my $JSON = JSON::PP->new->canonical;
 my $signal_status = 0;
@@ -25,7 +26,8 @@ my $RECOVERY_TIMEOUT = 12;
 my $EXIT_TIMEOUT = 5;
 my $DIGITAL_POLL_MS = 10000;
 my $POLICY_WINDOW = 12;
-my %CASES = map { $_ => 1 } qw(reconnect digital-word digital-control digital-policy digital-bits);
+my %CASES = map { $_ => 1 } qw(reconnect digital-word digital-control digital-policy digital-bits
+    enum-tc32-online enum-tc32-offline enum-e1608-online enum-e1608-offline enum-e1608-init);
 
 sub now {
     return clock_gettime(CLOCK_MONOTONIC);
@@ -34,6 +36,7 @@ sub now {
 sub launch_ioc {
     my ($run, $executable, $dbd, $template) = @_;
     my $binary_template = File::Spec->catfile(dirname($template), 'measCompBinaryIn.template');
+    my @extra = $run->{model} ? ($run->{model}, $run->{startup}) : ();
     pipe(my $input_read, my $input_write) or die "IOC input pipe: $!\n";
     pipe(my $output_read, my $output_write) or die "IOC output pipe: $!\n";
     my $pid = fork();
@@ -45,7 +48,7 @@ sub launch_ioc {
         $SIG{INT} = $SIG{TERM} = $SIG{PIPE} = 'DEFAULT';
         {
             no warnings 'exec';
-            exec { $executable } $executable, $dbd, $template, $run->{device}{address}, $binary_template;
+            exec { $executable } $executable, $dbd, $template, $run->{device}{address}, $binary_template, @extra;
         }
         POSIX::_exit(127);
     }
@@ -199,6 +202,141 @@ sub reap {
     my $status = $?;
     $run->{ioc_exit} = ($status & 127) ? -($status & 127) : $status >> 8;
     return 1;
+}
+
+sub enum_snapshot {
+    my ($run, $address, $parameter, $record) = @_;
+    my $line = command($run, "ENUM $address $parameter $record", 'ENUM');
+    my @parts = split / \|/, $line, -1;
+    my $header = shift @parts;
+    my ($status, $count, $error) = $header =~ /\AENUM (\d+) (\d+) (\d+)\z/;
+    die "malformed enum header: $header\n" unless defined $error;
+    die "incomplete enum snapshot: $line\n" unless @parts == $count + 16;
+    my @entries;
+    for my $part (@parts) {
+        my ($hex, $value, $severity) = $part =~ /\A((?:[0-9a-f]{2})*),(-?\d+),(-?\d+)\z/;
+        die "malformed enum entry: $part\n" unless defined $severity;
+        push @entries, [pack('H*', $hex), 0 + $value, 0 + $severity];
+    }
+    my @driver = splice @entries, 0, $count;
+    return {status => 0 + $status, error => 0 + $error, driver => \@driver, record => \@entries};
+}
+
+sub enum_targets {
+    my ($model) = @_;
+    my @targets;
+    my $ranges = $model eq 'tc32' ? [['N.A.', 0, 0]]
+        : [['+= 10V', 1, 0], ['+= 5V', 0, 0], ['+= 2V', 14, 0], ['+= 1V', 4, 0]];
+    my $types = $model eq 'tc32' ? [['TC deg.', 2, 0]] : [['Volts', 1, 0]];
+    for my $address (0, $model eq 'tc32' ? 31 : 7) {
+        push @targets, [$address, 'ANALOG_IN_RANGE', "TEST:A${address}Range", $ranges],
+            [$address, 'ANALOG_IN_TYPE', "TEST:A${address}Type", $types];
+        push @targets, [$address, 'VOLTAGE_IN_RANGE', "TEST:V${address}Range", $ranges]
+            if $model eq 'e1608';
+    }
+    if ($model eq 'e1608') {
+        for my $address (0, 1) {
+            push @targets, [$address, 'ANALOG_OUT_RANGE', "TEST:O${address}Range", [['+= 10V', 1, 0]]];
+        }
+    }
+    return @targets;
+}
+
+sub wait_connected {
+    my ($run, $expected) = @_;
+    my $deadline = now() + $RECOVERY_TIMEOUT;
+    while (now() < $deadline) {
+        my $line = command($run, 'CONNECTED', 'CONNECTED');
+        return $line if $line eq "CONNECTED $expected";
+        pause($run, 0.1);
+    }
+    die "connection state $expected deadline exceeded\n";
+}
+
+sub verify_enums {
+    my ($run, $phase) = @_;
+    my $verified = 0;
+    for my $target (enum_targets($run->{model})) {
+        my ($address, $parameter, $record, $expected) = @$target;
+        my $snapshot;
+        my @record_expected = (@$expected, map { ['', 0, 0] } @$expected .. 15);
+        my $deadline = now() + $RECOVERY_TIMEOUT;
+        while (1) {
+            $snapshot = enum_snapshot($run, $address, $parameter, $record);
+            last if $snapshot->{status} == 0 && !$snapshot->{error}
+                && $JSON->encode($snapshot->{record}) eq $JSON->encode(\@record_expected);
+            last if now() >= $deadline;
+            pause($run, 0.1);
+        }
+        check($run, "$phase $record driver enums", $snapshot->{status} == 0
+            && $JSON->encode($snapshot->{driver}) eq $JSON->encode($expected), $snapshot);
+        check($run, "$phase $record record enums", !$snapshot->{error}
+            && $JSON->encode($snapshot->{record}) eq $JSON->encode(\@record_expected), $snapshot);
+        for my $index (0 .. $#$expected) {
+            my $raw = $expected->[$index][1];
+            my $result = command($run, "ENUMSET $record $index");
+            check($run, "$phase $record selection $index accepted", $result eq 'RESULT 0', $result);
+            my $selection;
+            my $deadline = now() + $RECOVERY_TIMEOUT;
+            while (1) {
+                $selection = command($run, "ENUMVALUE $address $parameter $record", 'ENUMVALUE');
+                die "malformed enum value: $selection\n"
+                    unless $selection =~ /\AENUMVALUE(?: -?\d+){6}\z/;
+                last if $selection eq "ENUMVALUE 0 $raw $raw 0 0 1" || now() >= $deadline;
+                pause($run, 0.02);
+            }
+            check($run, "$phase $record selection $index maps to $raw",
+                $selection eq "ENUMVALUE 0 $raw $raw 0 0 1", $selection);
+        }
+        $verified++;
+    }
+    check($run, "$phase enum target coverage", $verified == ($run->{model} eq 'tc32' ? 4 : 8), $verified);
+    return;
+}
+
+sub exercise_enums {
+    my ($run) = @_;
+    my $device = $run->{device};
+    if ($run->{startup} eq 'init') {
+        check($run, 'records initialized before interrupt acceptance',
+            read_prefix($run, 'ENUMINIT', 15) eq 'ENUMINIT 0' && !$device->{connections},
+            $device->{connections});
+        $device->{online} = 1;
+        my $deadline = now() + $RECOVERY_TIMEOUT;
+        while (now() < $deadline && !grep { $_->{command} == 0x00 && $_->{reply} } @{$device->{traffic}}) {
+            pause($run, 0.02);
+        }
+        check($run, 'device polling before IOC initialization completes',
+            scalar(grep { $_->{command} == 0x00 && $_->{reply} } @{$device->{traffic}}), $device->{traffic});
+        print {$run->{input}} "GO\n" or die "IOC input write: $!\n";
+        check($run, 'connected while enum callbacks are disabled',
+            read_prefix($run, 'ENUMCONNECTED') eq 'ENUMCONNECTED 1 0', 'interruptAccept=0');
+    }
+    read_prefix($run, 'READY', 15);
+    if ($run->{case} =~ /-offline\z/) {
+        check($run, 'enum startup is disconnected',
+            command($run, 'CONNECTED', 'CONNECTED') eq 'CONNECTED 0' && !$device->{connections},
+            $device->{connections});
+        $device->{online} = 1;
+    }
+    wait_connected($run, 1);
+    verify_enums($run, 'startup');
+    for my $cycle (1 .. 2) {
+        my $fault_count = @{$device->{faults}};
+        $device->{fault} = [0x00, 'eof'];
+        wait_connected($run, 0);
+        check($run, "enum cycle $cycle transport fault", !defined($device->{fault})
+            && @{$device->{faults}} == $fault_count + 1 && $device->{faults}[-1][0] == 0x00,
+            $device->{faults}[-1]);
+        $device->{online} = 1;
+        wait_connected($run, 1);
+        verify_enums($run, "reconnect $cycle");
+    }
+    check($run, 'enum fixture commands supported', !@{$device->{errors}}, $device->{errors});
+    print {$run->{input}} "QUIT\n" or die "IOC input write: $!\n";
+    wait_exit($run, $EXIT_TIMEOUT) or die "IOC exit deadline exceeded\n";
+    check($run, 'IOC exits normally', $run->{ioc_exit} == 0, $run->{ioc_exit});
+    return;
 }
 
 sub digital_window {
@@ -505,9 +643,12 @@ sub main {
     $run->{log}->autoflush(1);
     STDOUT->autoflush(1);
     my $success = eval {
-        $run->{device} = TC32->new();
+        ($run->{model}, $run->{startup}) = $case =~ /\Aenum-(tc32|e1608)-(online|offline|init)\z/;
+        $run->{device} = ($run->{model} // '') eq 'e1608' ? E1608->new() : TC32->new();
+        $run->{device}{online} = 1 if $case =~ /-online\z/;
         launch_ioc($run, $executable, $dbd, $template);
-        if ($case eq 'reconnect') { exercise($run); }
+        if ($run->{model}) { exercise_enums($run); }
+        elsif ($case eq 'reconnect') { exercise($run); }
         else { exercise_digital($run); }
         1;
     };
@@ -536,7 +677,7 @@ __END__
 
 =head1 NAME
 
-test_reconnect.pl - Exercise the real IOC through a TC32 network fixture
+test_reconnect.pl - Exercise the real IOC through external Ethernet device fixtures
 
 =head1 SYNOPSIS
 
@@ -552,13 +693,13 @@ Print usage and exit successfully.
 
 =item --case NAME
 
-Select reconnect (default), digital-word, digital-control, digital-policy or digital-bits. Each invocation creates a fresh IOC and external fixture.
+Select reconnect (default), digital-word, digital-control, digital-policy, digital-bits, enum-tc32-online, enum-tc32-offline, enum-e1608-online, enum-e1608-offline or enum-e1608-init. Each invocation creates a fresh IOC and external fixture. Enum cases compare all record enum states with public driver reads and model-specific expected values, write every supported selection through the record, and check RVAL, SDEF, asynchronous completion, alarm severity and public driver readback. They repeat two transport failures and reconnects. The init case holds the real IOC after record initialization, enables device responses, proves connection while interruptAccept is zero, and resumes IOC initialization.
 
 =back
 
 =head1 ARGUMENTS
 
-IOC is the executable built by build_reconnect.pl; DBD is its generated database definition. TEMPLATE is the shipped measCompTemperatureIn.template; measCompBinaryIn.template must be in the same directory. LOG receives the complete IOC output and LOG.json receives assertion evidence, timestamped device requests, response frames, injected faults, fixture errors and the IOC exit status. Run inside the isolated network namespace described in tests/README.md.
+IOC is the executable built by build_reconnect.pl; DBD is its generated database definition. TEMPLATE is the shipped measCompTemperatureIn.template for reconnect/digital cases, or measCompAnalogIn.template for enum cases. The shipped measCompBinaryIn.template, measCompVoltageIn.template and measCompAnalogOut.template must be in the same directory. LOG receives the complete IOC output and LOG.json receives assertion evidence, timestamped device requests, response frames, injected faults, fixture errors and the IOC exit status. Run inside the isolated network namespace described in tests/README.md.
 
 =head1 EXIT STATUS
 
