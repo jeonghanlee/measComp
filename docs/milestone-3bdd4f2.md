@@ -8,19 +8,19 @@ Git upstream: origin/site
 Remote tracker: [jeonghanlee/measComp milestone 1](https://github.com/jeonghanlee/measComp/milestone/1)
 GitHub milestone: Connection recovery and device selection
 Due date: none
-Remote milestone observed at: 2026-11-06T08:23:21Z; state: open; four closed issues and two open issues
+Remote milestone observed at: 2026-11-06T19:16:41Z; state: open; five closed issues and one open issue
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/1`.
 Baseline commit: 3bdd4f24d820579f3f423c7be968baf2bb413950
 
-Next session entry point: Prepare M5's repository changes for commit. The four MAC cases pass on the fixed driver, the original driver fails the three absent-device cases at their connection deadlines, and the 14 existing cases pass unchanged. Landing and issue #6 closure remain pending. M6 remains a draft plan.
+Next session entry point: M1 through M5 are complete and landed on `origin/site`. M6 (issue #7) remains a draft plan; accept a plan and record implementation authorization before starting it.
 
 ## Scope
 
-This document assigns issues #2 through #7 to six work units for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. M1 through M4 are complete; M5 is in progress; M6 remains a draft plan.
+This document assigns issues #2 through #7 to six work units for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. M1 through M5 are complete; M6 remains a draft plan.
 
 The common integration environment is Linux with the real measComp driver, EPICS Base 7.0.10, asyn 4.45 and patched ULDAQ 1.2.2. Extend the shipped Perl/Bash tests and retain `tests/reconnect_ioc.cpp`; use external device protocol fixtures, without replacing internal driver, asyn or ULDAQ functions. Record the source commit, dependency identities, assertions, fixture requests and native IOC exit status for each executed check. Checks reproducing a defect must fail for the intended assertion on the affected baseline and pass on the fixed code; setup and build failures do not establish a regression. Compatibility checks and positive controls must pass on both the baseline and fixed code. When a check combines these purposes, record the defect assertion separately from its controls.
 
-Existing failure observations below come from the linked issues at the baseline commit. They are not successful verification of a fix. M1 through M4 record observed post-fix verification, repository landing and linked-issue closure. M5 records local verification with landing and closure pending; M6 remains unimplemented. The analog metadata findings are separate from the normal floating-point TC32 temperature path. MAC rediscovery and same-IP/different-discovery-port selection retain their specific applicability conditions.
+Existing failure observations below come from the linked issues at the baseline commit. They are not successful verification of a fix. M1 through M5 record observed post-fix verification, repository landing and linked-issue closure. M6 remains unimplemented. The analog metadata findings are separate from the normal floating-point TC32 temperature path. MAC rediscovery and same-IP/different-discovery-port selection retain their specific applicability conditions.
 
 **Out of scope:** ULDAQ vendor patch development, upstream submissions, release numbering, tags, deployment, output-command replay, and a general qualification of Windows, USB, EXP-32 or hardware power cycling. Changes to `docs/reconnection.md` and `tests/README.md` belong to the affected work unit when behavior or test invocation changes. Existing test limitations remain explicit.
 
@@ -34,10 +34,10 @@ Existing failure observations below come from the linked issues at the baseline 
 | M2 | Digital output failure handling | Milestone | Complete | No | | Transport errors disconnect and invalidate inputs before the next poll; [detail](#m2---digital-output-failure-handling) |
 | M3 | Analog enum initialization | Milestone | Complete | No | | Offline-start records obtain the same enums as online-start records; [detail](#m3---analog-enum-initialization) |
 | M4 | Analog conversion initialization | Milestone | Complete | No | | Offline-start conversion matches online-start conversion and measured raw values; [detail](#m4---analog-conversion-initialization) |
-| M5 | MAC device rediscovery | Milestone | In progress | No | | An initially absent MAC-selected device connects without disturbing existing ports; [detail](#m5---mac-device-rediscovery) |
+| M5 | MAC device rediscovery | Milestone | Complete | No | | An initially absent MAC-selected device connects without disturbing existing ports; [detail](#m5---mac-device-rediscovery) |
 | M6 | Discovery endpoint identity | Milestone | Not started | Yes | | Devices sharing an IP but using different discovery ports remain independent; [detail](#m6---discovery-endpoint-identity) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: four Complete, one In progress and one Not started. `Ready` records dependency readiness only; the remaining draft plan still requires acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
+The row order follows issue numbers and imposes no execution dependency. Current status: five Complete and one Not started. `Ready` records dependency readiness only; the remaining draft plan still requires acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
 
 ### Milestone Details
 
@@ -412,7 +412,7 @@ Recheck metadata with `gh issue view 5 --repo jeonghanlee/measComp --json state,
 Origin: 3bdd4f2 / M5
 Identity History: none
 GitHub Issue: [#6](https://github.com/jeonghanlee/measComp/issues/6)
-Status: In progress
+Status: Complete
 
 ##### Summary
 
@@ -489,19 +489,21 @@ Sanitizer check: the four MAC cases pass on a test IOC built with AddressSanitiz
 
 ##### Closure Evidence
 
-- Local implementation and verification are recorded; commit, landing and issue closure remain pending. All required checks passed and none is waived.
+- MAC rediscovery, the bounded inventory refresh and the real-IOC regression are implemented and verified in 470aabbf51bb2605c85a7c96550f85ff765c9c34. The commit contains the reviewed nine-file selection and its `Refs #6` footer does not close the issue. All required checks passed and none is waived.
 - Review: a third-person review in the author's stance, not independent of the author's session, read the complete change and re-ran it by execution from README commands extracted verbatim, with variants the author had not written. It reported two minor findings, three informational findings and one observation outside its scope; the owner ordered all of them applied. The review also showed that the first fix of the polling check missed a four-second stall, which was corrected and re-checked. Applying the findings added the case `mac-known-absent` and further assertions. The later runs showed that a refresh interval equal to the retry delay skipped refreshes under vendor-lock contention, and the owner chose a 4-second interval. Five further passes in the author's stance followed, four second-person and one third-person with a sanitizer build, and the last pass of each person returned no finding above the floor.
 - Evidence: `work/m5-mac/` retains the builds with command and input hashes, the UTC intervals, stdout, stderr, JSON and native runner status of every case, and the negative-control runs. These are local evidence paths; reproduce with the shipped builder and the cases in `tests/README.md`.
+- Remote landing observed at 2026-11-06T19:16:40Z: after fetching origin, local HEAD and origin/site both resolved to 470aabbf51bb2605c85a7c96550f85ff765c9c34. Their full-tree comparison produced no differences, their ahead/behind counts were zero, and the working tree was clean. The GitHub branch API confirmed the same site commit at the same observation. Recheck with `git -C /data/gitsrc/measComp fetch origin`, `git -C /data/gitsrc/measComp rev-parse HEAD origin/site` and `git -C /data/gitsrc/measComp diff HEAD origin/site`.
+- Issue #6 was closed as completed at 2026-11-06T19:15:25Z, observed at 2026-11-06T19:16:41Z. Its body matches the prepared implementation and verification record, with all five acceptance criteria checked. The completion comment references 470aabbf51bb2605c85a7c96550f85ff765c9c34. Required verification, repository landing and linked-issue closure are complete; no check or external condition is waived.
 
 ##### GitHub Projection
 
 Title: Rediscover MAC-addressed devices after offline startup
 Labels: bug
 GitHub Milestone: Connection recovery and device selection
-Observed State: open
+Observed State: closed (completed)
 Observed Labels: bug
 Observed Milestone: Connection recovery and device selection (milestone 1)
-Last Compared: 2026-11-06T18:37:17Z; remote updated at 2026-11-06T18:37:11Z
+Last Compared: 2026-11-06T19:16:41Z; remote updated at 2026-11-06T19:15:25Z
 
 Recheck metadata with `gh issue view 6 --repo jeonghanlee/measComp --json state,labels,milestone,updatedAt`.
 
