@@ -8,19 +8,19 @@ Git upstream: origin/site
 Remote tracker: [jeonghanlee/measComp milestone 1](https://github.com/jeonghanlee/measComp/milestone/1)
 GitHub milestone: Connection recovery and device selection
 Due date: none
-Remote milestone observed at: 2026-11-05T23:57:26Z; state: open; three closed issues and three open issues
+Remote milestone observed at: 2026-11-06T08:23:21Z; state: open; four closed issues and two open issues
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/1`.
 Baseline commit: 3bdd4f24d820579f3f423c7be968baf2bb413950
 
-Next session entry point: Prepare M4's reviewed repository changes for commit. The ten real IOC cases pass 940 assertions; original-device-support controls detect both offline conversion failures. Two independent implementation reviews and the reader review found no defects. Landing and issue #5 closure remain pending. M5 and M6 remain draft plans.
+Next session entry point: M1 through M4 are complete and landed on `origin/site`. M5 (issue #6) and M6 (issue #7) remain draft plans; accept a plan and record implementation authorization before starting either.
 
 ## Scope
 
-This document assigns issues #2 through #7 to six work units for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. M1 through M3 are complete; M4 is in progress; M5 and M6 remain draft plans.
+This document assigns issues #2 through #7 to six work units for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. M1 through M4 are complete; M5 and M6 remain draft plans.
 
 The common integration environment is Linux with the real measComp driver, EPICS Base 7.0.10, asyn 4.45 and patched ULDAQ 1.2.2. Extend the shipped Perl/Bash tests and retain `tests/reconnect_ioc.cpp`; use external device protocol fixtures, without replacing internal driver, asyn or ULDAQ functions. Record the source commit, dependency identities, assertions, fixture requests and native IOC exit status for each executed check. Checks reproducing a defect must fail for the intended assertion on the affected baseline and pass on the fixed code; setup and build failures do not establish a regression. Compatibility checks and positive controls must pass on both the baseline and fixed code. When a check combines these purposes, record the defect assertion separately from its controls.
 
-Existing failure observations below come from the linked issues at the baseline commit. They are not successful verification of a fix. M1 through M3 record observed post-fix verification, repository landing and linked-issue closure. M4 records local verification with landing and closure pending; M5 and M6 remain unimplemented. The analog metadata findings are separate from the normal floating-point TC32 temperature path. MAC rediscovery and same-IP/different-discovery-port selection retain their specific applicability conditions.
+Existing failure observations below come from the linked issues at the baseline commit. They are not successful verification of a fix. M1 through M4 record observed post-fix verification, repository landing and linked-issue closure. M5 and M6 remain unimplemented. The analog metadata findings are separate from the normal floating-point TC32 temperature path. MAC rediscovery and same-IP/different-discovery-port selection retain their specific applicability conditions.
 
 **Out of scope:** ULDAQ vendor patch development, upstream submissions, release numbering, tags, deployment, output-command replay, and a general qualification of Windows, USB, EXP-32 or hardware power cycling. Changes to `docs/reconnection.md` and `tests/README.md` belong to the affected work unit when behavior or test invocation changes. Existing test limitations remain explicit.
 
@@ -33,11 +33,11 @@ Existing failure observations below come from the linked issues at the baseline 
 | M1 | TC write and readback consistency | Milestone | Complete | No | | Device and cache agree after a failed write and reconnect; [detail](#m1---tc-write-and-readback-consistency) |
 | M2 | Digital output failure handling | Milestone | Complete | No | | Transport errors disconnect and invalidate inputs before the next poll; [detail](#m2---digital-output-failure-handling) |
 | M3 | Analog enum initialization | Milestone | Complete | No | | Offline-start records obtain the same enums as online-start records; [detail](#m3---analog-enum-initialization) |
-| M4 | Analog conversion initialization | Milestone | In progress | No | | Offline-start conversion matches online-start conversion and measured raw values; [detail](#m4---analog-conversion-initialization) |
+| M4 | Analog conversion initialization | Milestone | Complete | No | | Offline-start conversion matches online-start conversion and measured raw values; [detail](#m4---analog-conversion-initialization) |
 | M5 | MAC device rediscovery | Milestone | Not started | Yes | | An initially absent MAC-selected device connects without disturbing existing ports; [detail](#m5---mac-device-rediscovery) |
 | M6 | Discovery endpoint identity | Milestone | Not started | Yes | | Devices sharing an IP but using different discovery ports remain independent; [detail](#m6---discovery-endpoint-identity) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: three Complete, one In progress and two Not started. `Ready` records dependency readiness only; the remaining draft plans still require acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
+The row order follows issue numbers and imposes no execution dependency. Current status: four Complete and two Not started. `Ready` records dependency readiness only; the remaining draft plans still require acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
 
 ### Milestone Details
 
@@ -328,7 +328,7 @@ Recheck metadata with `gh issue view 4 --repo jeonghanlee/measComp --json state,
 Origin: 3bdd4f2 / M4
 Identity History: none
 GitHub Issue: [#5](https://github.com/jeonghanlee/measComp/issues/5)
-Status: In progress
+Status: Complete
 
 ##### Summary
 
@@ -387,20 +387,23 @@ Superseded Plan Artifacts: none
 
 ##### Closure Evidence
 
-- Local implementation and verification are recorded; commit, landing and issue closure remain pending. The ten positive IOC cases pass 940 assertions with no fixture errors and native exit zero. Original offline controls exit 1 at their intended assertion; cleanup then terminates those IOC processes, so their IOC exit is -15 rather than a successful shutdown.
+- Bounds recovery, the analog template change and the real-IOC regression are implemented and verified in 0bb9e829ddb1ffdbcea0e1033acf8eb2de67753e. The commit contains the reviewed fifteen-file selection and its `Refs #5` footer does not close the issue. No required check is waived. The ten positive IOC cases pass 940 assertions with no fixture errors and native exit zero. Original offline controls exit 1 at their intended assertion; cleanup then terminates those IOC processes, so their IOC exit is -15 rather than a successful shutdown.
 - Review acceptance: 2026-11-06. Independent API and test implementation reviews and a subsequent maintainer reader review returned no findings. API checks expanded the production DBD, compiled its registrar, and exercised six real failed-initialization observations in two isolated IOCs. The test reviewer rebuilt independently, repeated the 940 positive assertions and original controls, and checked 611 actual analog frames and 54 successful phase values. This does not qualify a full production executable link or installation.
+- Full third-person review: 2026-11-06. A subsequent complete review of the change against the accepted plan returned no findings and made no product change. It repeated the ten positive cases (940 checks, native IOC exit zero, 447 valid actual analog response frames) and matched all 19 build inputs to the current files. The original device support and template passed both online controls; its offline TC32 run failed `startup A0 conversion coefficients` and its offline E-1608 run failed `startup A0 raw 32768 engineering value`, each with IOC status -15 from cleanup. Additional real-IOC probes passed 55 checks (candidate online 18, candidate offline 19, original asyn online 18): `ESLO=2.25` and `EOFF=-7.5` configured before `iocInit` survived initialization, SCAN transitions among periodic, I/O Intr and Passive kept the SLOPE coefficients, and two-sample averaging was retained. Evidence: `work/m4-bounds/review-pass4/audit.txt` and its `probe-*` files.
 - Evidence: `work/m4-bounds/build-04/` retains build commands, dependency/source hashes, generated DBD/registrar, IOC binary and each case's UTC interval, stdout, stderr, JSON, source hashes and native runner status. `perl-debian13-final.txt` and `perl-rocky8.txt` retain compatibility checks. These are local evidence paths; reproduce with the shipped builder and cases in `tests/README.md`.
-- Source identity: baseline `8d210c413e3d994d50bea2332c644a922a495f28` plus this worktree; `devMeasComp.cpp` SHA-256 `299969e94503a42ce2938a7134bce1bd933530f9aa73f000d2a41605adfcd79b`; `test_reconnect.pl` SHA-256 `23dba4484d623747d83a6697c27e3da714c3b048bea2d2db7b92d40cb5de737c`. Original controls use the same final runner, fixture, binary and libraries with the exact HEAD AnalogIn template, whose SHA-256 is `b1e6947addb294e5a309c2eac55d45ff74176368edc17d4e735d8dbe9cc61674`.
+- Source identity: baseline `8d210c413e3d994d50bea2332c644a922a495f28` plus the worktree later committed unchanged as 0bb9e829ddb1ffdbcea0e1033acf8eb2de67753e (all fifteen product hashes matched the reviewed inputs immediately before and after the commit); `devMeasComp.cpp` SHA-256 `299969e94503a42ce2938a7134bce1bd933530f9aa73f000d2a41605adfcd79b`; `test_reconnect.pl` SHA-256 `23dba4484d623747d83a6697c27e3da714c3b048bea2d2db7b92d40cb5de737c`. Original controls use the same final runner, fixture, binary and libraries with the exact HEAD AnalogIn template, whose SHA-256 is `b1e6947addb294e5a309c2eac55d45ff74176368edc17d4e735d8dbe9cc61674`.
+- Remote landing observed at 2026-11-06T08:22:52Z: after fetching origin, local HEAD and origin/site both resolved to 0bb9e829ddb1ffdbcea0e1033acf8eb2de67753e. Their full-tree comparison produced no differences, their ahead/behind counts were zero, and the working tree was clean. The GitHub branch API confirmed the same site commit at 2026-11-06T08:22:53Z. Recheck with `git -C /data/gitsrc/measComp fetch origin`, `git -C /data/gitsrc/measComp rev-parse HEAD origin/site` and `git -C /data/gitsrc/measComp diff HEAD origin/site`.
+- Issue #5 was closed as completed at 2026-11-06T08:21:31Z, observed at 2026-11-06T08:22:53Z. Its body matches the prepared implementation and verification record, with all five acceptance criteria checked. The completion comment references 0bb9e829ddb1ffdbcea0e1033acf8eb2de67753e. Required verification, repository landing and linked-issue closure are complete; no check or external condition is waived.
 
 ##### GitHub Projection
 
 Title: Initialize analog conversion bounds after offline startup
 Labels: bug
 GitHub Milestone: Connection recovery and device selection
-Observed State: open
+Observed State: closed (completed)
 Observed Labels: bug
 Observed Milestone: Connection recovery and device selection (milestone 1)
-Last Compared: 2026-11-05T18:05:51Z; remote updated at 2026-11-05T18:05:23Z
+Last Compared: 2026-11-06T08:22:53Z; remote updated at 2026-11-06T08:21:31Z
 
 Recheck metadata with `gh issue view 5 --repo jeonghanlee/measComp --json state,labels,milestone,updatedAt`.
 
