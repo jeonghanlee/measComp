@@ -33,7 +33,7 @@ my $INTERVAL_TOLERANCE = 0.1;
 my $REDISCOVERY_LIMIT = 8;
 my $POLL_GAP_LIMIT = 3;
 my $MAC_A = "\x02\0\0\0\0\x32";
-my $MAC_B = "\x02\0\0\0\0\x33";
+my $MAC_B = "\x02\0\0\0\xab\x33";
 my %CASES = map { $_ => 1 } qw(reconnect digital-word digital-control digital-policy digital-bits
     enum-tc32-online enum-tc32-offline enum-e1608-online enum-e1608-offline enum-e1608-init
     bounds-tc32-online bounds-tc32-offline bounds-e1608-online bounds-e1608-offline
@@ -565,7 +565,9 @@ sub setup_mac {
     $run->{device}{online} = 1;
     $run->{device2} = TC32->new('192.0.2.3', undef, {broadcast => 1, mac => $MAC_B});
     $run->{device2}{temperature} = 37.25;
-    $run->{second_id} = mac_text($MAC_B);
+    # The second device is selected by a lower-case MAC; the driver must match it to the upper-case
+    # MAC the vendor library reports.
+    $run->{second_id} = lc mac_text($MAC_B);
     return;
 }
 
@@ -1182,7 +1184,7 @@ Enum cases compare all record enum states with public driver reads and model-spe
 
 Bounds cases check TC32 24-bit conversion metadata without valid voltage samples, or E-1608 16-bit raw samples through periodic and I/O Intr records. They check engineering-limit changes; E-1608 also checks two-sample averaging, manual SLOPE coefficients, transport recovery and missing-sample alarms. The external fixture supplies raw values; real ULDAQ, driver and device support produce the record values.
 
-MAC cases select each TC32 fixture by MAC address, so the real driver finds it through broadcast discovery. mac-tc32-offline observes the absent device for eleven seconds while the fixture records every broadcast discovery request, then makes it available and requires a valid reading within twelve seconds. The recorded requests must number two or three and be at least 3.9 seconds apart, the four-second minimum refresh interval less a tolerance. mac-tc32-online requires the startup discovery to be the only discovery request through an idle interval, an EOF reconnect, and periods with auto-connect disabled and with the port disabled while the device is absent. mac-two-ports runs a second port, with its own MAC and a different temperature, whose device appears while the first port stays connected and must connect within eight seconds, which a skipped refresh would exceed; the first port must keep its single connection and value, must never go three seconds without a request from the moment it is healthy, and the inventory must list exactly two distinct MAC addresses. mac-known-absent takes the first device offline before the second device appears, then requires the inventory to keep both MAC addresses and the first port to reconnect from its inventory entry without another discovery request. The two-port cases end the IOC directly and check only that it stops on request, because with two ports the driver's exit handlers can destroy a port object while its poller thread still runs, which aborts some exits of the original driver as well.
+MAC cases select each TC32 fixture by MAC address, so the real driver finds it through broadcast discovery. mac-tc32-offline observes the absent device for eleven seconds while the fixture records every broadcast discovery request, then makes it available and requires a valid reading within twelve seconds. The recorded requests must number two or three and be at least 3.9 seconds apart, the four-second minimum refresh interval less a tolerance. mac-tc32-online requires the startup discovery to be the only discovery request through an idle interval, an EOF reconnect, and periods with auto-connect disabled and with the port disabled while the device is absent. mac-two-ports runs a second port, selected by a lower-case MAC with hexadecimal letters and with a different temperature, whose device appears while the first port stays connected and must connect within eight seconds, which a skipped refresh would exceed; the first port must keep its single connection and value, must never go three seconds without a request from the moment it is healthy, and the inventory must list exactly two distinct MAC addresses. mac-known-absent takes the first device offline before the second device appears, then requires the inventory to keep both MAC addresses and the first port to reconnect from its inventory entry without another discovery request. The two-port cases end the IOC directly and check only that it stops on request, because with two ports the driver's exit handlers can destroy a port object while its poller thread still runs, which aborts some exits of the original driver as well.
 
 =back
 

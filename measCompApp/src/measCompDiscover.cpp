@@ -13,6 +13,7 @@
 #include <epicsGuard.h>
 #include <epicsMutex.h>
 #include <epicsStdio.h>
+#include <epicsString.h>
 #include <epicsTime.h>
 #include <measCompDiscover.h>
 
@@ -33,6 +34,9 @@ bool measCompInventoryInitialized = false;
 static epicsMutex inventoryMutex;
 // Monotonic time of the most recent broadcast discovery attempt, 0 before the first one.
 static epicsUInt64 lastDiscoveryAttempt = 0;
+// Vendor status of the most recent inventory refresh; a change is reported once, so a persistent
+// failure appears once in the log and once more when the query succeeds again.
+static int lastRefreshStatus = 0;
 
 #ifndef WIN32
 // Copies the IP address of an Ethernet device into the reserved field of its descriptor.
@@ -117,13 +121,15 @@ void measCompShowDevices()
 }
 
 // Returns the inventory index of the device with this unique ID, or -1 if it is not in the inventory.
+// Unique IDs are hexadecimal USB serial numbers or MAC addresses, which the vendor library reports
+// in upper case, so the comparison ignores case.
 static int measCompFindDevice(const char *uniqueId)
 {
   for (int i=0; i<measCompNumDevices; i++) {
     #ifdef WIN32
-      if (strcmp(uniqueId, measCompInventory[i].UniqueID) == 0) return i;
+      if (epicsStrCaseCmp(uniqueId, measCompInventory[i].UniqueID) == 0) return i;
     #else
-      if (strcmp(uniqueId, measCompInventory[i].uniqueId) == 0) return i;
+      if (epicsStrCaseCmp(uniqueId, measCompInventory[i].uniqueId) == 0) return i;
     #endif
   }
   return -1;
@@ -138,6 +144,7 @@ static int measCompRefreshInventory()
   epicsUInt64 now = epicsMonotonicGet();
   DaqDeviceDescriptor found[MAX_DEVICES];
   int added = 0;
+  int status;
   #ifdef WIN32
     int numFound = MAX_DEVICES;
   #else
@@ -149,10 +156,16 @@ static int measCompRefreshInventory()
   lastDiscoveryAttempt = now;
   #ifdef WIN32
     cbIgnoreInstaCal();
-    if (cbGetDaqDeviceInventory(ETHERNET_IFC, found, &numFound)) return 0;
+    status = cbGetDaqDeviceInventory(ETHERNET_IFC, found, &numFound);
   #else
-    if (ulGetDaqDeviceInventory(ETHERNET_IFC, found, &numFound)) return 0;
+    status = ulGetDaqDeviceInventory(ETHERNET_IFC, found, &numFound);
   #endif
+  if (status != lastRefreshStatus) {
+    if (status) printf("measCompRefreshInventory: inventory query failed, status=%d\n", status);
+    else printf("measCompRefreshInventory: inventory query succeeded again\n");
+    lastRefreshStatus = status;
+  }
+  if (status) return 0;
   for (int i=0; i<(int)numFound; i++) {
     #ifdef WIN32
       if (measCompFindDevice(found[i].UniqueID) != -1) continue;

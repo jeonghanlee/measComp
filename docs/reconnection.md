@@ -111,7 +111,10 @@ query waits 250 ms for each non-loopback IPv4 interface, and the vendor calls
 of the other ports wait for the same time. Devices selected by IP address or a
 resolvable host name use their own lookup and do not trigger a refresh; a name
 that cannot be resolved is treated like a MAC address and triggers the same
-bounded refresh. USB serial numbers never trigger one. The refresh belongs to
+bounded refresh. USB serial numbers never trigger one. MAC addresses and
+serial numbers are matched without regard to case. A refresh whose vendor
+query fails is reported once, and once more when the query succeeds again,
+so a persistent failure does not flood the log. The refresh belongs to
 the shared lookup, but a driver that calls it only once at construction, such
 as `USBCTR`, does not retry: a MAC that is absent at that call is found only
 if the single refresh allowed at that moment sees it. A known device that

@@ -12,11 +12,11 @@ Remote milestone observed at: 2026-11-06T19:16:41Z; state: open; five closed iss
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/1`.
 Baseline commit: 3bdd4f24d820579f3f423c7be968baf2bb413950
 
-Next session entry point: M1 through M5 are complete and landed on `origin/site`. M6 (issue #7) remains a draft plan; accept a plan and record implementation authorization before starting it.
+Next session entry point: Prepare M7 (identifier case and refresh diagnostics) for commit; its checks passed and landing is pending. M6 (issue #7) remains a draft plan; accept a plan and record implementation authorization before starting it.
 
 ## Scope
 
-This document assigns issues #2 through #7 to six work units for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. M1 through M5 are complete; M6 remains a draft plan.
+This document assigns issues #2 through #7 to six work units, plus one follow-up work unit without an issue, for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. M1 through M5 are complete; M6 remains a draft plan.
 
 The common integration environment is Linux with the real measComp driver, EPICS Base 7.0.10, asyn 4.45 and patched ULDAQ 1.2.2. Extend the shipped Perl/Bash tests and retain `tests/reconnect_ioc.cpp`; use external device protocol fixtures, without replacing internal driver, asyn or ULDAQ functions. Record the source commit, dependency identities, assertions, fixture requests and native IOC exit status for each executed check. Checks reproducing a defect must fail for the intended assertion on the affected baseline and pass on the fixed code; setup and build failures do not establish a regression. Compatibility checks and positive controls must pass on both the baseline and fixed code. When a check combines these purposes, record the defect assertion separately from its controls.
 
@@ -36,8 +36,9 @@ Existing failure observations below come from the linked issues at the baseline 
 | M4 | Analog conversion initialization | Milestone | Complete | No | | Offline-start conversion matches online-start conversion and measured raw values; [detail](#m4---analog-conversion-initialization) |
 | M5 | MAC device rediscovery | Milestone | Complete | No | | An initially absent MAC-selected device connects without disturbing existing ports; [detail](#m5---mac-device-rediscovery) |
 | M6 | Discovery endpoint identity | Milestone | Not started | Yes | | Devices sharing an IP but using different discovery ports remain independent; [detail](#m6---discovery-endpoint-identity) |
+| M7 | Identifier case and refresh diagnostics | Milestone | In progress | No | | A lower-case MAC connects and a failed refresh is reported once; [detail](#m7---identifier-case-and-refresh-diagnostics) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: five Complete and one Not started. `Ready` records dependency readiness only; the remaining draft plan still requires acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
+The row order follows issue numbers and imposes no execution dependency. Current status: five Complete, one In progress and one Not started. `Ready` records dependency readiness only; the remaining draft plan still requires acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
 
 ### Milestone Details
 
@@ -583,6 +584,76 @@ Observed Milestone: Connection recovery and device selection (milestone 1)
 Last Compared: 2026-11-05T18:05:51Z; remote updated at 2026-11-05T18:05:33Z
 
 Recheck metadata with `gh issue view 7 --repo jeonghanlee/measComp --json state,labels,milestone,updatedAt`.
+
+#### M7 - Identifier Case And Refresh Diagnostics
+
+Origin: 3bdd4f2 / M7
+Identity History: none
+GitHub Issue: none
+Status: In progress
+
+##### Summary
+
+Two observations of the review of M5 on 2026-11-06. A MAC address configured in lower case never connects, on the driver before M5 and after it, because the inventory lookup compares the identifier with the upper-case MAC the vendor library reports; after M5 such a port also triggers one broadcast refresh per retry for as long as it stays configured. A refresh whose vendor inventory query fails leaves no diagnostic, so a persistent failure to rediscover devices is invisible beyond the driver's connection errors.
+
+##### Scope
+
+Match MAC addresses and USB serial numbers without regard to case in the inventory lookup, and report a failed inventory refresh once when it starts failing and once when it succeeds again.
+
+Out of scope: any other identifier syntax, the direct-IP lookup, and reporting every failed refresh.
+
+##### Completion Criteria
+
+- A port configured with a lower-case MAC containing hexadecimal letters connects and lists its upper-case MAC in the inventory.
+- A refresh whose vendor query fails is reported exactly once per failure episode, and its recovery once.
+- The existing MAC and regression cases pass unchanged.
+- All local checks pass with durable evidence.
+
+##### Dependencies And Decisions
+
+- Decision Date: 2026-11-06. The owner directed both review observations to be applied and recorded as this work unit without a linked issue. The case-insensitive comparison uses `epicsStrCaseCmp` and applies to the unique-ID lookup only.
+- No execution dependency on M6.
+
+##### Implementation Plan
+
+Plan Status: accepted
+Plan Acceptance: 2026-11-06; accepted by the owner's direction to apply the review findings.
+Implementation Authorization: 2026-11-06; implement and verify items 1 to 3.
+Superseded Plan Artifacts: none
+
+1. In `measCompApp/src/measCompDiscover.cpp`, compare unique IDs with `epicsStrCaseCmp` in the inventory lookup. Verified by T1.
+2. In the same file, keep the vendor status of the last refresh and print one line when it changes to a failure and one line when it changes back. Verified by T2.
+3. Configure the second port of `mac-two-ports` and `mac-known-absent` with a lower-case MAC containing hexadecimal letters; document both behaviors and the two baselines in `docs/reconnection.md` and `tests/README.md`. Verified by T1 and T3.
+
+##### Test Plan
+
+| Label | Layer | Method | Environment | Expected Result |
+| --- | --- | --- | --- | --- |
+| T1 | Integration | Run `mac-two-ports` and `mac-known-absent` with the second port configured as a lower-case MAC. Repeat on the M5 source `470aabb` with identical tests. | Common integration environment; two TC32 fixtures | Fixed driver: both cases pass and the inventory lists the upper-case MAC. M5 source: both cases fail at the second port's connection deadline. |
+| T2 | Integration | Build a scratch copy whose refresh forces a vendor failure on its second and third calls, run `mac-tc32-offline` with a 26-second absence. | Common integration environment | Exactly one failure line and one recovery line in the IOC log; the case still passes. |
+| T3 | Regression | Run the 18 shipped cases, the Perl checks on Debian 13 and Rocky 8, and the MAC cases on a sanitizer build. | Common integration environment; Perl 5.40.1 and 5.26.3 | All assertions pass unchanged with normal IOC exit; no sanitizer report. |
+
+##### Verification Results
+
+| Label | Observed At | Environment | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| T1 | 2026-11-06T19:51:01Z to 19:56:04Z (fixed); M5-source control in the same run | Debian 13; real IOC, Base 7.0.10, asyn 4.45.0, patched ULDAQ 1.2.2; two TC32 fixtures | Pass: `mac-two-ports` 8 and `mac-known-absent` 7 assertions with the second port `02:00:00:00:ab:33`; the inventory lists `02:00:00:00:AB:33`. The M5 source passes the online and offline cases and fails both two-port cases at the second port's deadline. | `work/m5-mac/r14/build/`; `work/m5-mac/r14/m5/` |
+| T2 | 2026-11-06, same session | Same environment; scratch copy with forced failures | Pass: six refreshes 5.06 to 5.10 seconds apart; the log holds one `inventory query failed, status=99` line and one `succeeded again` line; the case passes. | `work/m5-mac/r14/diag/` |
+| T3 | 2026-11-06T19:51:01Z to 19:56:04Z | Same environment; Debian 13 Perl 5.40.1; Rocky 8 Perl 5.26.3 | Pass: 14 existing cases 995 assertions and 4 MAC cases 35 assertions, every IOC exit 0; Perl checks pass on both; the MAC cases pass on the AddressSanitizer and UBSan build with no report. The source before M5 still fails the three absent-device cases at their deadlines. | `work/m5-mac/r14/`; `perl-debian13.txt`; `perl-rocky8.txt`; `asan/`; `base/` |
+
+Source identity of the final run: `measCompDiscover.cpp` SHA-256 prefix `55f3b409e0e7850b`; `test_reconnect.pl` prefix `82327ddfa0aa618a`; the 19 build input hashes were rechecked unchanged after execution.
+
+##### Closure Evidence
+
+- Local implementation and verification are recorded; commit, landing and closure remain pending. No linked issue; closure requires landing evidence only.
+- Review: two third-person passes in the author's stance on 2026-11-06, the second after the findings were applied; one minor finding on the README baseline description was applied.
+
+##### GitHub Projection
+
+Title: none
+Labels: none
+GitHub Milestone: none
+Observed State: not projected
 
 ## Backlog
 

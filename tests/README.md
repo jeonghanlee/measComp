@@ -243,7 +243,10 @@ known inventory entry in every case.
 
 `mac-two-ports` runs two ports on separate fixtures with different MAC
 addresses and temperatures, 22.5 C and 37.25 C. The first device is present at
-startup and the second is absent. Both fixtures must see the same bounded
+startup and the second is absent. The second port is configured with its MAC
+in lower case, so the case also verifies that the driver matches it to the
+upper-case MAC the vendor library reports; `mac-known-absent` uses the same
+identifiers. Both fixtures must see the same bounded
 discovery requests during the absence. When the second device becomes
 available it must connect with its own value within eight seconds, which a
 refresh skipped because of the lock wait would exceed, while the first port
@@ -271,15 +274,20 @@ still require exit status zero.
 The Ethernet-only restriction of the refresh is not exercised, because the
 namespace has no USB device; it is established by reading the source.
 
-The original-behavior control builds the IOC from the original
+The original-behavior controls build the IOC from an earlier
 `measCompDiscover.cpp` with the final tests and fixtures. Use a scratch copy of
-the repository in which only `measCompApp/src/measCompDiscover.cpp` is restored
-to its original content, because `build_reconnect.pl` compiles the sources of
-the repository that holds the running tests. The online case must pass. The
+the repository in which only `measCompApp/src/measCompDiscover.cpp` is replaced
+by the earlier version, because `build_reconnect.pl` compiles the sources of
+the repository that holds the running tests. Two baselines detect two defects.
+With the source from before MAC rediscovery, the online case must pass, the
 offline case must fail at the connection deadline with the port still
 disconnected, and the two-port and known-absent cases must fail at the second
-port's connection deadline. Build or setup errors do not count as detecting the
-defect.
+port's connection deadline, because an absent device is never rediscovered.
+With the source that rediscovers devices but compares MAC addresses with their
+exact case, the online and offline cases must pass and only the two-port and
+known-absent cases must fail at the second port's connection deadline, because
+their second port is configured with a lower-case MAC. Build or setup errors do
+not count as detecting a defect.
 
 ## Negative controls
 
