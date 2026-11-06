@@ -12,15 +12,15 @@ Remote milestone observed at: 2026-11-05T23:57:26Z; state: open; three closed is
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/1`.
 Baseline commit: 3bdd4f24d820579f3f423c7be968baf2bb413950
 
-Next session entry point: Review M4's analog conversion plan for issue #5, confirming the supported mechanism for updating record conversion bounds before plan acceptance and implementation authorization. M1 through M3 are complete; M4 through M6 still require plan acceptance and implementation authorization.
+Next session entry point: Prepare M4's reviewed repository changes for commit. The ten real IOC cases pass 940 assertions; original-device-support controls detect both offline conversion failures. Two independent implementation reviews and the reader review found no defects. Landing and issue #5 closure remain pending. M5 and M6 remain draft plans.
 
 ## Scope
 
-This document assigns issues #2 through #7 to six work units for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. M1 through M3 are complete; M4 through M6 remain draft plans.
+This document assigns issues #2 through #7 to six work units for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. M1 through M3 are complete; M4 is in progress; M5 and M6 remain draft plans.
 
 The common integration environment is Linux with the real measComp driver, EPICS Base 7.0.10, asyn 4.45 and patched ULDAQ 1.2.2. Extend the shipped Perl/Bash tests and retain `tests/reconnect_ioc.cpp`; use external device protocol fixtures, without replacing internal driver, asyn or ULDAQ functions. Record the source commit, dependency identities, assertions, fixture requests and native IOC exit status for each executed check. Checks reproducing a defect must fail for the intended assertion on the affected baseline and pass on the fixed code; setup and build failures do not establish a regression. Compatibility checks and positive controls must pass on both the baseline and fixed code. When a check combines these purposes, record the defect assertion separately from its controls.
 
-Existing failure observations below come from the linked issues at the baseline commit. They are not successful verification of a fix. M1 through M3 record observed post-fix verification, repository landing and linked-issue closure. M4 through M6 remain pending. The analog metadata findings are separate from the normal floating-point TC32 temperature path. MAC rediscovery and same-IP/different-discovery-port selection retain their specific applicability conditions.
+Existing failure observations below come from the linked issues at the baseline commit. They are not successful verification of a fix. M1 through M3 record observed post-fix verification, repository landing and linked-issue closure. M4 records local verification with landing and closure pending; M5 and M6 remain unimplemented. The analog metadata findings are separate from the normal floating-point TC32 temperature path. MAC rediscovery and same-IP/different-discovery-port selection retain their specific applicability conditions.
 
 **Out of scope:** ULDAQ vendor patch development, upstream submissions, release numbering, tags, deployment, output-command replay, and a general qualification of Windows, USB, EXP-32 or hardware power cycling. Changes to `docs/reconnection.md` and `tests/README.md` belong to the affected work unit when behavior or test invocation changes. Existing test limitations remain explicit.
 
@@ -33,11 +33,11 @@ Existing failure observations below come from the linked issues at the baseline 
 | M1 | TC write and readback consistency | Milestone | Complete | No | | Device and cache agree after a failed write and reconnect; [detail](#m1---tc-write-and-readback-consistency) |
 | M2 | Digital output failure handling | Milestone | Complete | No | | Transport errors disconnect and invalidate inputs before the next poll; [detail](#m2---digital-output-failure-handling) |
 | M3 | Analog enum initialization | Milestone | Complete | No | | Offline-start records obtain the same enums as online-start records; [detail](#m3---analog-enum-initialization) |
-| M4 | Analog conversion initialization | Milestone | Not started | Yes | | Offline-start conversion matches online-start conversion and measured raw values; [detail](#m4---analog-conversion-initialization) |
+| M4 | Analog conversion initialization | Milestone | In progress | No | | Offline-start conversion matches online-start conversion and measured raw values; [detail](#m4---analog-conversion-initialization) |
 | M5 | MAC device rediscovery | Milestone | Not started | Yes | | An initially absent MAC-selected device connects without disturbing existing ports; [detail](#m5---mac-device-rediscovery) |
 | M6 | Discovery endpoint identity | Milestone | Not started | Yes | | Devices sharing an IP but using different discovery ports remain independent; [detail](#m6---discovery-endpoint-identity) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: three Complete and three Not started. `Ready` records dependency readiness only; the remaining draft plans still require acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
+The row order follows issue numbers and imposes no execution dependency. Current status: three Complete, one In progress and two Not started. `Ready` records dependency readiness only; the remaining draft plans still require acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
 
 ### Milestone Details
 
@@ -328,7 +328,7 @@ Recheck metadata with `gh issue view 4 --repo jeonghanlee/measComp --json state,
 Origin: 3bdd4f2 / M4
 Identity History: none
 GitHub Issue: [#5](https://github.com/jeonghanlee/measComp/issues/5)
-Status: Not started
+Status: In progress
 
 ##### Summary
 
@@ -351,41 +351,46 @@ Out of scope: replacing the asyn library, inventing universal ADC bounds, changi
 
 ##### Dependencies And Decisions
 
-- None. M3 and M4 share an analog template and may share fixture support, but neither fix is a prerequisite for the other. Metadata-only TC32 observations cannot satisfy the analog-value check.
+- No execution dependency. M3 and M4 share an analog template and fixture support; metadata-only TC32 observations cannot satisfy the analog-value check.
+- Decision Date: 2026-11-06. Maintain automatic ADC bounds recovery in this repository's device support. Delegate averaging through the public asyn DSET, preserve its private state, and maintain confirmed bounds separately. Per-model DB bit-count configuration was not selected.
 
 ##### Implementation Plan
 
-Plan Status: draft
-Plan Acceptance: none
-Implementation Authorization: none
+Plan Status: accepted
+Plan Acceptance: 2026-11-06; repo-owned automatic bounds recovery selected and confirmed after two independent plan reviews.
+Implementation Authorization: 2026-11-06; implement and verify the selected option 1 with the parent as facilitator and implementer.
 Superseded Plan Artifacts: none
 
-1. Confirm the supported record/device-support mechanism for updating conversion bounds after connection and record the concrete API in this plan before acceptance.
-2. Add a measComp-owned initialization path that supplies confirmed model-specific bounds and recomputes conversion coefficients without marking uninitialized input data valid.
-3. Retain those bounds when engineering limits change; keep the floating-point temperature records outside this path.
-4. Add raw-value and engineering-value observations from a supported analog-model protocol fixture through the shipped record template.
+1. Add `devMeasComp.cpp` with `measCompInt32Average`; resolve `asynAiInt32Average` through `registryDeviceSupportFind()` and delegate initialization, averaging reads and I/O interrupt registration through the public `aidset`. Preserve asyn's `dpvt` ownership and callback state.
+2. Obtain bounds through a separate `asynInt32SyncIO` connection. Retry at record processing while unconfirmed; accept only successful `high > low` results. Calculate LINEAR `ESLO`/`EOFF` before converting a valid raw sample. Preserve INVALID/UDF on missing bounds or missing samples; never acquire a record lock from a driver callback.
+3. Retain confirmed bounds for the configured device lifetime and recalculate when engineering limits change. Preserve manual SLOPE coefficients and leave the floating-point temperature and voltage paths unchanged.
+4. Use one shipped `devMeasComp.dbd` include in production and the test builder, update the AnalogIn template, and hash the new build inputs. Extend the external E1608 raw response and actual IOC observations for periodic, I/O Intr and Passive records.
+5. Verify real raw-to-engineering values, two-sample averaging, changed limits, no-sample invalidity and TCP recovery. Run the same final test code against the original device support and template: online controls must pass and offline conversion assertions must fail for the intended defect. Retain the temperature and enum regressions.
 
 ##### Test Plan
 
 | Label | Layer | Method | Environment | Expected Result |
 | --- | --- | --- | --- | --- |
-| T1 | Integration | Repeat the `EGUF=1`, `EGUL=0` metadata reproduction for online and offline startup, then query actual bounds and record conversion fields. | Common integration environment; TC32 metadata fixture | Both startup orders produce identical confirmed bounds and the expected slope for the reported ADC resolution. |
-| T2 | Integration | Supply multiple documented raw ADC values, including endpoints and an interior value, through a supported analog protocol and process the real analog record. | Common integration environment; supported analog-model protocol fixture | Engineering-unit values follow the model's actual bounds and configured engineering limits. |
-| T3 | Integration | Change `EGUF` and `EGUL` after connection, then repeat raw-value measurements and another reconnect. | Common integration environment; supported analog-model protocol fixture | Conversion recomputes from valid device bounds and remains correct after recovery. |
-| T4 | Regression | Run the complete shipped temperature reconnect suite. | Common integration environment; TC32 fixture | Floating-point temperatures, alarms and recovery behavior remain correct; the IOC exits normally. |
+| T1 | Integration | Run both TC32 bounds startup cases with `EGUF=1`, `EGUL=0`, then change limits. Repeat with the original template and identical harness. | Common integration environment; TC32 metadata fixture | Both fixed startup orders produce the 24-bit slope without validating a missing sample; original online passes and offline fails the coefficient assertion. |
+| T2 | Integration | Run both E-1608 bounds startup cases, apply input settings through the shipped records, and supply raw 32768, 0 and 65535 through Ethernet responses. Repeat with the original template and identical harness. | Common integration environment; E-1608 fixture | Periodic and I/O Intr values use 16-bit bounds; original online passes and offline fails the raw-32768 engineering-value assertion after receiving the sample. |
+| T3 | Integration | Change `EGUF` and `EGUL`, check two-sample averaging and manual SLOPE, repeat values after TCP EOF/reconnect, and process Passive input without new samples. | Common integration environment; E-1608 fixture | Confirmed bounds remain correct, averaging and SLOPE remain intact, and missing samples preserve value with UDF and INVALID. |
+| T4 | Regression | Run complete temperature reconnect and all five enum cases; check Perl syntax, POD, modules and CLI on Debian 13 and Rocky 8. | Common integration environment; Perl 5.40.1 and 5.26.3 | All existing assertions pass with normal IOC exit, and both interpreters accept the test tools. |
 
 ##### Verification Results
 
 | Label | Observed At | Environment | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| T1 | Not run | Common integration environment | Pending | None |
-| T2 | Not run | Common integration environment | Pending | None |
-| T3 | Not run | Common integration environment | Pending | None |
-| T4 | Not run | Common integration environment | Pending | None |
+| T1 | 2026-11-06T02:22:14Z | Debian 13; Base 7.0.10, asyn 4.45, patched ULDAQ 1.2.2 | Pass | `bounds-tc32-online`: 22 checks; offline: 25. Both confirm `0..16777215`, initial `ESLO=5.9604648328104516e-08`, changed-limit coefficients and invalid missing samples. Original online passes 22; offline fails `startup A0 conversion coefficients` with `ESLO=1`. |
+| T2 | 2026-11-06T02:22:17Z | Same integration environment; E-1608 fixture | Pass | `bounds-e1608-online`: 106 checks; offline: 109, including T3. Both process raw 32768, 0 and 65535 with `0..65535` bounds and valid values. Original online passes 106; offline receives raw 32768 but fails `startup A0 raw 32768 engineering value`: `ESLO=1`, `VAL=32758` for limits -10..10. |
+| T3 | 2026-11-06T02:22:17Z | Same integration environment; E-1608 fixture | Pass | T2 cases include limits 2..7, an average raw value of 2000, manual `ESLO=2`, `EOFF=3`, `VAL=2003`, observed analog TCP EOF, restored values, and unchanged Passive value with UDF/INVALID when samples stop. |
+| T4 | 2026-11-06T02:24:07Z | Same integration environment; Debian 13 Perl 5.40.1; Rocky 8 Perl 5.26.3 | Pass | Reconnect 38 checks; TC32 enum online/offline 55/56; E-1608 enum online/offline/init 175/176/178: 678 checks. All six IOC exits are zero with no fixture errors. Syntax, POD, 17 module loads and help/invalid-usage checks pass on both Perl versions. |
 
 ##### Closure Evidence
 
-- None. No fix or successful post-fix verification is recorded.
+- Local implementation and verification are recorded; commit, landing and issue closure remain pending. The ten positive IOC cases pass 940 assertions with no fixture errors and native exit zero. Original offline controls exit 1 at their intended assertion; cleanup then terminates those IOC processes, so their IOC exit is -15 rather than a successful shutdown.
+- Review acceptance: 2026-11-06. Independent API and test implementation reviews and a subsequent maintainer reader review returned no findings. API checks expanded the production DBD, compiled its registrar, and exercised six real failed-initialization observations in two isolated IOCs. The test reviewer rebuilt independently, repeated the 940 positive assertions and original controls, and checked 611 actual analog frames and 54 successful phase values. This does not qualify a full production executable link or installation.
+- Evidence: `work/m4-bounds/build-04/` retains build commands, dependency/source hashes, generated DBD/registrar, IOC binary and each case's UTC interval, stdout, stderr, JSON, source hashes and native runner status. `perl-debian13-final.txt` and `perl-rocky8.txt` retain compatibility checks. These are local evidence paths; reproduce with the shipped builder and cases in `tests/README.md`.
+- Source identity: baseline `8d210c413e3d994d50bea2332c644a922a495f28` plus this worktree; `devMeasComp.cpp` SHA-256 `299969e94503a42ce2938a7134bce1bd933530f9aa73f000d2a41605adfcd79b`; `test_reconnect.pl` SHA-256 `23dba4484d623747d83a6697c27e3da714c3b048bea2d2db7b92d40cb5de737c`. Original controls use the same final runner, fixture, binary and libraries with the exact HEAD AnalogIn template, whose SHA-256 is `b1e6947addb294e5a309c2eac55d45ff74176368edc17d4e735d8dbe9cc61674`.
 
 ##### GitHub Projection
 

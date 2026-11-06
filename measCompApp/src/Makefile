@@ -19,6 +19,7 @@ endif
 
 DBD += measCompApp.dbd
 DBD += measCompSupport.dbd
+DBD += devMeasComp.dbd
 
 LIBRARY_IOC_WIN32 += measComp
 ifeq ($(HAVE_ULDAQ), YES)
@@ -30,6 +31,7 @@ endif
 # rather than directly into the IOC application.
 
 measComp_SRCS += drvMultiFunction.cpp
+measComp_SRCS += devMeasComp.cpp
 measComp_SRCS += drvUSBCTR.cpp
 measComp_SRCS += measCompDiscover.cpp
 measComp_SRCS += USBCTR_SNL.st

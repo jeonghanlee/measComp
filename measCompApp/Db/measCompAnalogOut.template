@@ -1,6 +1,6 @@
+# Setting PHAS=2 ensures that the Range record will process before this record during iocInit
 record(ao,"$(P)$(R)") {
     field(PINI, "$(PINI=YES)")
-    # Setting PHAS=2 ensures that the Range record will process before this record during iocInit
     field(PHAS, "2")
     field(DTYP, "asynInt32")
     field(FLNK, "$(P)$(R)Return.PROC  PP MS")
@@ -17,12 +17,12 @@ record(ao,"$(P)$(R)") {
 }
 
 # Note: the driver constructs these enum fields based on model.
+# A defined state enables enum conversion even when initialization is offline.
 record(mbbo,"$(P)$(R)Range")
 {
     field(PINI, "YES")
     field(DTYP, "asynInt32")
     field(OUT,  "@asyn($(PORT),$(ADDR))ANALOG_OUT_RANGE")
-    # A defined state enables enum conversion even when initialization is offline.
     field(ZRST, "Unavailable")
 }
 

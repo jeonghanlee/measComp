@@ -1,7 +1,7 @@
 record(ai,"$(P)$(R)")
 {
     field(SCAN, "$(SCAN)")
-    field(DTYP, "asynInt32Average")
+    field(DTYP, "measCompInt32Average")
     field(INP,  "@asyn($(PORT),$(ADDR))ANALOG_IN_VALUE")
     field(LINR, "LINEAR")
     field(EGUF, "$(EGUF)")
@@ -12,23 +12,23 @@ record(ai,"$(P)$(R)")
 }
 
 # Note: the driver constructs these enum fields based on model.
+# A defined state enables enum conversion even when initialization is offline.
 record(mbbo,"$(P)$(R)Range")
 {
     field(PINI, "YES")
     field(DTYP, "asynInt32")
     field(OUT,  "@asyn($(PORT),$(ADDR))ANALOG_IN_RANGE")
-    # A defined state enables enum conversion even when initialization is offline.
     field(ZRST, "Unavailable")
     field(VAL,  "$(RANGE)")
 }
 
 # Note: the driver constructs these enum fields based on model.
+# A defined state enables enum conversion even when initialization is offline.
 record(mbbo,"$(P)$(R)Type")
 {
     field(PINI, "YES")
     field(DTYP, "asynInt32")
     field(OUT,  "@asyn($(PORT),$(ADDR))ANALOG_IN_TYPE")
-    # A defined state enables enum conversion even when initialization is offline.
     field(ZRST, "Unavailable")
 }
 

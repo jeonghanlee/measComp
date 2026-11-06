@@ -1,7 +1,7 @@
 # MultiFunction reconnect tests
 
-The test compiles the repository's MultiFunction driver and device discovery
-code, links real EPICS/asyn/ULDAQ libraries, and loads the shipped
+The test compiles the repository's MultiFunction driver, device discovery
+and analog device support, links real EPICS/asyn/ULDAQ libraries, and loads the shipped
 temperature, binary-input and analog templates. External TC32 and E-1608
 UDP/TCP devices are simulated; internal driver and library functions run unchanged.
 
@@ -163,6 +163,46 @@ real polling while `interruptAccept=0`, and then completes IOC initialization.
 This verifies deferred enum delivery through the actual asyn device support.
 These cases establish enum metadata and selection conversion, not ADC
 engineering-unit conversion, analog output voltage or scan acquisition.
+
+## Analog bounds cases
+
+Repeat the namespace setup above and use the existing `BUILD`. Each case
+starts a fresh IOC and external fixture. The builder includes the shipped
+`devMeasComp.dbd` and records its hash along with `devMeasComp.cpp`.
+
+```bash
+export TEMPLATE="$PWD/measCompApp/Db/measCompAnalogIn.template"
+export IOC="$BUILD/reconnect-ioc"
+export DBD="$BUILD/reconnect.dbd"
+export RUNNER="$PWD/tests/test_reconnect.pl"
+timeout 90s perl "$RUNNER" --case bounds-tc32-online "$IOC" "$DBD" "$TEMPLATE" "$BUILD/bt-on.log"
+timeout 90s perl "$RUNNER" --case bounds-tc32-offline "$IOC" "$DBD" "$TEMPLATE" "$BUILD/bt-off.log"
+timeout 90s perl "$RUNNER" --case bounds-e1608-online "$IOC" "$DBD" "$TEMPLATE" "$BUILD/be-on.log"
+timeout 90s perl "$RUNNER" --case bounds-e1608-offline "$IOC" "$DBD" "$TEMPLATE" "$BUILD/be-off.log"
+exit
+```
+
+TC32 cases compare the confirmed 24-bit bounds and LINEAR coefficients with
+`EGUL=0`, `EGUF=1`, then with changed limits. These are metadata checks:
+without analog samples, the records must remain undefined and INVALID.
+
+E-1608 cases apply Range and Type through the shipped records after enums
+arrive, including reapplying settings whose PINI writes failed while offline.
+The fixture supplies raw counts 32768, 0 and 65535 through real Ethernet
+responses. Periodic and I/O Intr records must receive fresh samples with
+correct RVAL, ESLO, EOFF and VAL, first for limits -10..10 and then 2..7.
+The same measurements repeat after an observed TCP EOF and reconnect.
+Additional checks cover a two-sample I/O Intr average, manual SLOPE coefficients,
+and Passive processing without new samples after port disable. A missing sample
+must leave the value unchanged with UDF and INVALID severity.
+
+For the original-behavior control, keep the final runner, fixtures, IOC binary
+and dependencies identical, but pass a scratch copy of the original
+`measCompAnalogIn.template` using `asynInt32Average`. Both online cases must
+pass. Offline TC32 must fail the startup coefficient assertion; offline E-1608
+must reach the raw-32768 response and fail its startup engineering-value
+assertion. Setup errors or absent sample traffic do not count as detecting
+the conversion defect.
 
 ## Negative controls
 

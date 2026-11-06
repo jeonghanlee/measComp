@@ -27,7 +27,10 @@ my $EXIT_TIMEOUT = 5;
 my $DIGITAL_POLL_MS = 10000;
 my $POLICY_WINDOW = 12;
 my %CASES = map { $_ => 1 } qw(reconnect digital-word digital-control digital-policy digital-bits
-    enum-tc32-online enum-tc32-offline enum-e1608-online enum-e1608-offline enum-e1608-init);
+    enum-tc32-online enum-tc32-offline enum-e1608-online enum-e1608-offline enum-e1608-init
+    bounds-tc32-online bounds-tc32-offline bounds-e1608-online bounds-e1608-offline);
+my @ANALOG_FIELDS = qw(bounds_status low high raw value slope offset egul eguf udf severity pact linear timestamp);
+my $ANALOG_TOLERANCE = 1e-10;
 
 sub now {
     return clock_gettime(CLOCK_MONOTONIC);
@@ -36,7 +39,8 @@ sub now {
 sub launch_ioc {
     my ($run, $executable, $dbd, $template) = @_;
     my $binary_template = File::Spec->catfile(dirname($template), 'measCompBinaryIn.template');
-    my @extra = $run->{model} ? ($run->{model}, $run->{startup}) : ();
+    my $startup = ($run->{family} // '') eq 'bounds' ? "bounds-$run->{startup}" : $run->{startup};
+    my @extra = $run->{model} ? ($run->{model}, $startup) : ();
     pipe(my $input_read, my $input_write) or die "IOC input pipe: $!\n";
     pipe(my $output_read, my $output_write) or die "IOC output pipe: $!\n";
     my $pid = fork();
@@ -333,6 +337,201 @@ sub exercise_enums {
         verify_enums($run, "reconnect $cycle");
     }
     check($run, 'enum fixture commands supported', !@{$device->{errors}}, $device->{errors});
+    print {$run->{input}} "QUIT\n" or die "IOC input write: $!\n";
+    wait_exit($run, $EXIT_TIMEOUT) or die "IOC exit deadline exceeded\n";
+    check($run, 'IOC exits normally', $run->{ioc_exit} == 0, $run->{ioc_exit});
+    return;
+}
+
+sub analog_snapshot {
+    my ($run, $address) = @_;
+    my @values = split /\s+/, command($run, "ANALOG $address TEST:A$address", 'ANALOG');
+    shift @values;
+    die "malformed analog snapshot\n" unless @values == @ANALOG_FIELDS;
+    for my $value (@values) { die "non-numeric analog snapshot: $value\n" unless looks_like_number($value); }
+    my %observed;
+    @observed{@ANALOG_FIELDS} = map { 0 + $_ } @values;
+    return \%observed;
+}
+
+sub put_analog {
+    my ($run, $address, $field, $value) = @_;
+    my $request = "PUT TEST:A$address.$field $value";
+    my $result = command($run, $request);
+    # Process-passive fields may return device-support failure after the write.
+    my ($status, $actual) = $result =~ /\ARESULT (0|-1|-2) (\S+)\z/;
+    my $accepted = defined $status && looks_like_number($actual)
+        && ($field eq 'PROC' || near($actual, $value));
+    check($run, $request, $accepted, $result);
+    return;
+}
+
+sub near {
+    my ($actual, $expected) = @_;
+    return abs($actual - $expected) <= $ANALOG_TOLERANCE;
+}
+
+sub verify_coefficients {
+    my ($run, $address, $phase, $observed, $low, $high) = @_;
+    check($run, "$phase A$address confirmed model bounds", !$observed->{bounds_status}
+        && $observed->{low} == $low && $observed->{high} == $high, $observed);
+    my $slope = ($observed->{eguf} - $observed->{egul}) / ($high - $low);
+    my $offset = ($high * $observed->{egul} - $low * $observed->{eguf}) / ($high - $low);
+    check($run, "$phase A$address conversion coefficients", near($observed->{slope}, $slope)
+        && near($observed->{offset}, $offset), $observed);
+    return ($slope, $offset);
+}
+
+sub wait_analog {
+    my ($run, $address, $raw, $after, $process) = @_;
+    my $deadline = now() + $RECOVERY_TIMEOUT;
+    my $observed;
+    while (now() < $deadline) {
+        command($run, "PUT TEST:A$address.PROC 1") if $process;
+        $observed = analog_snapshot($run, $address);
+        return $observed if !$observed->{bounds_status} && !$observed->{udf}
+            && !$observed->{severity} && !$observed->{pact} && $observed->{raw} == $raw
+            && (!defined $after || $observed->{timestamp} > $after);
+        pause($run, 0.05);
+    }
+    die 'deadline exceeded waiting for analog sample: ' . $JSON->encode($observed) . "\n";
+}
+
+sub verify_raw_values {
+    my ($run, $phase) = @_;
+    for my $raw (32768, 0, 65535) {
+        my @previous = map { analog_snapshot($run, $_)->{timestamp} } (0, 1);
+        my $start = scalar @{$run->{device}{traffic}};
+        $run->{device}{analog_raw} = {0 => $raw, 1 => $raw};
+        for my $address (0, 1) {
+            my $observed = wait_analog($run, $address, $raw, $previous[$address]);
+            my @fresh = grep {
+                $_->{command} == 0x10 && $_->{reply}
+                && hex(substr($_->{payload}, 0, 2)) % 8 == $address
+                && substr($_->{reply}, 12, 4) eq unpack('H*', pack('v', $raw))
+            } @{$run->{device}{traffic}}[$start .. $#{$run->{device}{traffic}}];
+            check($run, "$phase A$address raw $raw reached device path", scalar @fresh, \@fresh);
+            my $expected = $observed->{egul} + $raw * ($observed->{eguf} - $observed->{egul}) / 65535;
+            check($run, "$phase A$address raw $raw engineering value",
+                near($observed->{value}, $expected), $observed);
+            verify_coefficients($run, $address, "$phase raw $raw", $observed, 0, 65535);
+        }
+    }
+    return;
+}
+
+sub configure_analog {
+    my ($run) = @_;
+    for my $address (0 .. 2) {
+        for my $setting (['Range', 'ANALOG_IN_RANGE', '+= 10V'], ['Type', 'ANALOG_IN_TYPE', 'Volts']) {
+            my ($suffix, $parameter, $label) = @$setting;
+            my $record = "TEST:A$address$suffix";
+            my $deadline = now() + $RECOVERY_TIMEOUT;
+            while (1) {
+                my $snapshot = enum_snapshot($run, $address, $parameter, $record);
+                last if !$snapshot->{status} && !$snapshot->{error}
+                    && $snapshot->{record}[0][0] eq $label && $snapshot->{record}[0][1] == 1;
+                die "$record enum delivery deadline exceeded\n" if now() >= $deadline;
+                pause($run, 0.05);
+            }
+            my $result = command($run, "ENUMSET $record 0");
+            check($run, "$record configuration accepted", $result eq 'RESULT 0', $result);
+            $deadline = now() + $RECOVERY_TIMEOUT;
+            while (1) {
+                $result = command($run, "ENUMVALUE $address $parameter $record", 'ENUMVALUE');
+                last if $result eq 'ENUMVALUE 0 1 1 0 0 1';
+                die "$record configuration deadline exceeded: $result\n" if now() >= $deadline;
+                pause($run, 0.05);
+            }
+            check($run, "$record configuration confirmed", 1, $result);
+        }
+    }
+    return;
+}
+
+sub exercise_bounds {
+    my ($run) = @_;
+    my $device = $run->{device};
+    read_prefix($run, 'READY', 15);
+    if ($run->{startup} eq 'offline') {
+        check($run, 'bounds startup is disconnected',
+            command($run, 'CONNECTED', 'CONNECTED') eq 'CONNECTED 0' && !$device->{connections},
+            $device->{connections});
+        put_analog($run, 2, 'PROC', 1);
+        my $offline = analog_snapshot($run, 2);
+        check($run, 'offline bounds do not validate input', $offline->{udf} && $offline->{severity} == 3, $offline);
+        $device->{online} = 1;
+    }
+    wait_connected($run, 1);
+    if ($run->{model} eq 'tc32') {
+        for my $phase ('startup', 'changed limits') {
+            for my $address (0, 2) {
+                if ($phase eq 'changed limits') {
+                    put_analog($run, $address, 'EGUL', -2);
+                    put_analog($run, $address, 'EGUF', 3);
+                }
+                put_analog($run, $address, 'PROC', 1);
+                my $observed = analog_snapshot($run, $address);
+                verify_coefficients($run, $address, $phase, $observed, 0, 16777215);
+                check($run, "$phase A$address metadata does not validate a sample",
+                    $observed->{udf} && $observed->{severity} == 3, $observed);
+            }
+        }
+    } else {
+        configure_analog($run);
+        verify_raw_values($run, 'startup');
+        for my $address (0, 1) {
+            put_analog($run, $address, 'EGUL', 2);
+            put_analog($run, $address, 'EGUF', 7);
+        }
+        verify_raw_values($run, 'changed limits');
+
+        put_analog($run, 1, 'SVAL', 2);
+        $device->{analog_raw}{1} = [1000, 3000];
+        $device->{analog_index}{1} = 0;
+        my $average = wait_analog($run, 1, 2000);
+        check($run, 'I/O Intr retains two-sample averaging',
+            near($average->{value}, 2 + 2000 * 5 / 65535), $average);
+        $device->{analog_raw}{1} = 32768;
+
+        put_analog($run, 0, 'LINR', 1);
+        put_analog($run, 0, 'ESLO', 2);
+        put_analog($run, 0, 'EOFF', 3);
+        $device->{analog_raw}{0} = 1000;
+        my $manual = wait_analog($run, 0, 1000);
+        check($run, 'manual SLOPE conversion remains unchanged',
+            $manual->{slope} == 2 && $manual->{offset} == 3 && $manual->{value} == 2003, $manual);
+        put_analog($run, 0, 'LINR', 2);
+
+        my $fault_count = @{$device->{faults}};
+        $device->{fault} = [0x10, 'eof'];
+        wait_connected($run, 0);
+        check($run, 'analog EOF reached transport', !defined($device->{fault})
+            && @{$device->{faults}} == $fault_count + 1 && $device->{faults}[-1][0] == 0x10,
+            $device->{faults}[-1]);
+        put_analog($run, 0, 'PROC', 1);
+        my $disconnected = analog_snapshot($run, 0);
+        check($run, 'analog input is invalid after transport failure',
+            $disconnected->{severity} == 3, $disconnected);
+        $device->{online} = 1;
+        wait_connected($run, 1);
+        verify_raw_values($run, 'reconnect');
+
+        my $passive = wait_analog($run, 2, 32768, undef, 1);
+        check($run, 'passive input has a valid sample before no-sample check',
+            near($passive->{value}, -10 + 32768 * 20 / 65535), $passive);
+        check($run, 'disable polling for no-sample check', command($run, 'ENABLE 0') eq 'RESULT 0', 'ENABLE 0');
+        my $requests = $device->{requests};
+        pause($run, 0.25);
+        check($run, 'polling stopped before no-sample check', $requests == $device->{requests}, $device->{requests});
+        put_analog($run, 2, 'PROC', 1);
+        my $before = analog_snapshot($run, 2);
+        put_analog($run, 2, 'PROC', 1);
+        my $empty = analog_snapshot($run, 2);
+        check($run, 'no new sample preserves value and marks invalid',
+            $empty->{udf} && $empty->{severity} == 3 && $empty->{value} == $before->{value}, $empty);
+    }
+    check($run, 'bounds fixture commands supported', !@{$device->{errors}}, $device->{errors});
     print {$run->{input}} "QUIT\n" or die "IOC input write: $!\n";
     wait_exit($run, $EXIT_TIMEOUT) or die "IOC exit deadline exceeded\n";
     check($run, 'IOC exits normally', $run->{ioc_exit} == 0, $run->{ioc_exit});
@@ -643,11 +842,12 @@ sub main {
     $run->{log}->autoflush(1);
     STDOUT->autoflush(1);
     my $success = eval {
-        ($run->{model}, $run->{startup}) = $case =~ /\Aenum-(tc32|e1608)-(online|offline|init)\z/;
+        ($run->{family}, $run->{model}, $run->{startup}) = $case =~ /\A(enum|bounds)-(tc32|e1608)-(online|offline|init)\z/;
         $run->{device} = ($run->{model} // '') eq 'e1608' ? E1608->new() : TC32->new();
         $run->{device}{online} = 1 if $case =~ /-online\z/;
         launch_ioc($run, $executable, $dbd, $template);
-        if ($run->{model}) { exercise_enums($run); }
+        if (($run->{family} // '') eq 'bounds') { exercise_bounds($run); }
+        elsif ($run->{model}) { exercise_enums($run); }
         elsif ($case eq 'reconnect') { exercise($run); }
         else { exercise_digital($run); }
         1;
@@ -693,13 +893,17 @@ Print usage and exit successfully.
 
 =item --case NAME
 
-Select reconnect (default), digital-word, digital-control, digital-policy, digital-bits, enum-tc32-online, enum-tc32-offline, enum-e1608-online, enum-e1608-offline or enum-e1608-init. Each invocation creates a fresh IOC and external fixture. Enum cases compare all record enum states with public driver reads and model-specific expected values, write every supported selection through the record, and check RVAL, SDEF, asynchronous completion, alarm severity and public driver readback. They repeat two transport failures and reconnects. The init case holds the real IOC after record initialization, enables device responses, proves connection while interruptAccept is zero, and resumes IOC initialization.
+Select reconnect (default), digital-word, digital-control, digital-policy, digital-bits, enum-tc32-online, enum-tc32-offline, enum-e1608-online, enum-e1608-offline, enum-e1608-init, bounds-tc32-online, bounds-tc32-offline, bounds-e1608-online or bounds-e1608-offline. Each invocation creates a fresh IOC and external fixture.
+
+Enum cases compare all record enum states with public driver reads and model-specific expected values, write every supported selection through the record, and check RVAL, SDEF, asynchronous completion, alarm severity and public driver readback. They repeat two transport failures and reconnects. The init case holds the real IOC after record initialization, enables device responses, proves connection while interruptAccept is zero, and resumes IOC initialization.
+
+Bounds cases check TC32 24-bit conversion metadata without valid voltage samples, or E-1608 16-bit raw samples through periodic and I/O Intr records. They check engineering-limit changes; E-1608 also checks two-sample averaging, manual SLOPE coefficients, transport recovery and missing-sample alarms. The external fixture supplies raw values; real ULDAQ, driver and device support produce the record values.
 
 =back
 
 =head1 ARGUMENTS
 
-IOC is the executable built by build_reconnect.pl; DBD is its generated database definition. TEMPLATE is the shipped measCompTemperatureIn.template for reconnect/digital cases, or measCompAnalogIn.template for enum cases. The shipped measCompBinaryIn.template, measCompVoltageIn.template and measCompAnalogOut.template must be in the same directory. LOG receives the complete IOC output and LOG.json receives assertion evidence, timestamped device requests, response frames, injected faults, fixture errors and the IOC exit status. Run inside the isolated network namespace described in tests/README.md.
+IOC is the executable built by build_reconnect.pl; DBD is its generated database definition. TEMPLATE is the shipped measCompTemperatureIn.template for reconnect/digital cases, or measCompAnalogIn.template for enum/bounds cases. The shipped measCompBinaryIn.template, measCompVoltageIn.template and measCompAnalogOut.template must be in the same directory. LOG receives the complete IOC output and LOG.json receives assertion evidence, timestamped device requests, response frames, injected faults, fixture errors and the IOC exit status. Run inside the isolated network namespace described in tests/README.md.
 
 =head1 EXIT STATUS
 

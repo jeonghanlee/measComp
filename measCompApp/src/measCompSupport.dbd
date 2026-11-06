@@ -1,3 +1,4 @@
+include "devMeasComp.dbd"
 registrar(drvMultiFunctionRegister)
 registrar(drvUSBCTRRegister)
 registrar(USBCTR_SNLRegistrar)

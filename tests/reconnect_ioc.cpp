@@ -110,6 +110,55 @@ static int loadEnums(const char *inputTemplate, const char *model)
     return 0;
 }
 
+static int loadBounds(const char *inputTemplate, const char *model)
+{
+    bool metadata = !std::strcmp(model, "tc32");
+    const char *scans[] = {".1 second", metadata ? "Passive" : "I/O Intr", "Passive"};
+    for (int addr=0; addr<3; addr++) {
+        char macros[256];
+        std::snprintf(macros, sizeof(macros),
+            "P=TEST:,R=A%d,PORT=DAQ,ADDR=%d,SCAN=%s,EGUF=%d,EGUL=%d,HOPR=10,LOPR=-10,PREC=6,RANGE=0",
+            addr, addr, scans[addr], metadata ? 1 : 10, metadata ? 0 : -10);
+        if (dbLoadRecords(inputTemplate, macros)) return 6;
+    }
+    return 0;
+}
+
+static void putNumber(const char *name, double value)
+{
+    DBADDR address;
+    long status = dbNameToAddr(name, &address);
+    double actual = -1000000;
+    if (!status) {
+        status = dbPutField(&address, DBR_DOUBLE, &value, 1);
+        dbScanLock(address.precord);
+        actual = field(name);
+        dbScanUnlock(address.precord);
+    }
+    std::printf("RESULT %ld %.17g\n", status, actual);
+}
+
+static void readAnalog(int addr, const char *record)
+{
+    epicsInt32 low = 0, high = 0;
+    asynStatus status = pasynInt32SyncIO->getBoundsOnce("DAQ", addr, &low, &high, "ANALOG_IN_VALUE");
+    DBADDR address;
+    if (dbNameToAddr(record, &address)) {
+        std::puts("ANALOGERROR record missing");
+        return;
+    }
+    const char *fields[] = {"RVAL", "VAL", "ESLO", "EOFF", "EGUL", "EGUF", "UDF", "SEVR", "PACT", "LINR"};
+    double values[11];
+    dbScanLock(address.precord);
+    for (int i=0; i<10; i++)
+        values[i] = field((std::string(record) + "." + fields[i]).c_str());
+    values[10] = address.precord->time.secPastEpoch + address.precord->time.nsec * 1e-9;
+    dbScanUnlock(address.precord);
+    std::printf("ANALOG %d %d %d", status, low, high);
+    for (int i=0; i<11; i++) std::printf(" %.17g", values[i]);
+    std::puts("");
+}
+
 static void enumInitHook(initHookState state)
 {
     if (state != initHookAfterInitDatabase) return;
@@ -201,7 +250,9 @@ int main(int argc, char **argv)
     if (review_registerRecordDeviceDriver(pdbbase)) return 4;
     if (MultiFunctionConfig("DAQ", argv[3], 1, 1)) return 5;
     if (enumMode) {
-        if (loadEnums(argv[2], argv[5])) return 6;
+        if (!std::strncmp(argv[6], "bounds-", 7)) {
+            if (loadBounds(argv[2], argv[5])) return 6;
+        } else if (loadEnums(argv[2], argv[5])) return 6;
         if (!std::strcmp(argv[6], "init")) initHookRegister(enumInitHook);
     } else {
         if (dbLoadRecords(argv[2], "P=TEST:,R=T0,PORT=DAQ,ADDR=0,SCAN=I/O Intr,PREC=3")) return 6;
@@ -215,6 +266,7 @@ int main(int argc, char **argv)
     char command[200];
     while (std::fgets(command, sizeof(command), stdin)) {
         int value;
+        double number;
         unsigned int digital, mask;
         char parameter[64], record[64];
         if (!std::strncmp(command, "CONNECTED", 9)) {
@@ -222,6 +274,10 @@ int main(int argc, char **argv)
             pasynManager->isConnected(port, &connected);
             std::printf("CONNECTED %d\n", connected);
         }
+        else if (std::sscanf(command, "ANALOG %d %63s", &value, record) == 2)
+            readAnalog(value, record);
+        else if (std::sscanf(command, "PUT %63s %lf", record, &number) == 2)
+            putNumber(record, number);
         else if (std::sscanf(command, "ENUM %d %63s %63s", &value, parameter, record) == 3)
             readEnums(value, parameter, record);
         else if (std::sscanf(command, "ENUMSET %63s %d", record, &value) == 2)

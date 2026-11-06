@@ -29,7 +29,14 @@ sub response {
         return $self->reject('invalid analog input request length') unless length($data) == 2;
         my ($channel, $range) = unpack('CC', $data);
         return $self->reject('invalid analog input channel or range') if $channel > 11 || $range > 3;
-        return pack('v', 32768);
+        my $address = $channel >= 8 ? $channel - 8 : $channel;
+        my $raw = $self->{analog_raw}{$address} // 32768;
+        if (ref $raw eq 'ARRAY') {
+            my $index = $self->{analog_index}{$address}++;
+            $raw = $raw->[$index % @$raw];
+        }
+        return $self->reject('analog raw value out of bounds') if $raw < 0 || $raw > 65535;
+        return pack('v', $raw);
     }
     if ($command == 0x21) {
         return $self->reject('invalid analog output request')
@@ -61,10 +68,10 @@ __END__
 
 =head1 NAME
 
-E1608 - External E-1608 UDP/TCP fixture for enum integration tests
+E1608 - External E-1608 UDP/TCP fixture for analog integration tests
 
 =head1 DESCRIPTION
 
-Uses TC32's nonblocking Ethernet transport and fault injection with E-1608 discovery and command payloads. Implements calibration memory with unit slopes and zero offsets, digital I/O, counters, scan stop and single analog input/output commands used by ULDAQ 1.2.2. Analog input returns midscale raw counts. Unsupported requests are errors. This bounded fixture verifies metadata recovery, not hardware calibration or scan acquisition.
+Uses TC32's nonblocking Ethernet transport and fault injection with E-1608 discovery and command payloads. Implements calibration memory with unit slopes and zero offsets, digital I/O, counters, scan stop and single analog input/output commands used by ULDAQ 1.2.2. Analog input returns per-channel raw counts or a repeating sample sequence; the default is 32768. Unsupported requests are errors. This bounded fixture verifies metadata recovery and single-input conversion, not hardware calibration or scan acquisition.
 
 =cut

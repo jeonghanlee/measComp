@@ -96,16 +96,17 @@ sub main {
     my $dbd = "$build/reconnect.dbd";
     my $registrar = "$build/reconnect_register.cpp";
     my $definition = "$build/reconnectInclude.dbd";
-    write_file($definition, "include \"base.dbd\"\ninclude \"asyn.dbd\"\nregistrar(drvMultiFunctionRegister)\n");
+    write_file($definition, "include \"base.dbd\"\ninclude \"asyn.dbd\"\ninclude \"devMeasComp.dbd\"\nregistrar(drvMultiFunctionRegister)\n");
     my @sources = ("$RealBin/reconnect_ioc.cpp", $registrar,
         "$repository/measCompApp/src/drvMultiFunction.cpp",
+        "$repository/measCompApp/src/devMeasComp.cpp",
         "$repository/measCompApp/src/measCompDiscover.cpp");
     my @includes = ("$base/include", "$base/include/os/Linux", "$base/include/compiler/gcc",
         "$asyn/include", $include, "$repository/measCompApp/src");
     my @libraries = ("$asyn/lib/$options{arch}", "$base/lib/$options{arch}", $library);
     my @commands = (
         ['perl', "$binaries/dbdExpand.pl", '-I', "$base/dbd", '-I', "$asyn/dbd",
-         '-o', $dbd, $definition],
+         '-I', "$repository/measCompApp/src", '-o', $dbd, $definition],
         ['perl', "$binaries/registerRecordDeviceDriver.pl", '-o', $registrar,
          $dbd, 'review_registerRecordDeviceDriver'],
         ['g++', '-std=gnu++11', '-O0', '-g', '-Wno-write-strings',
@@ -118,6 +119,7 @@ sub main {
     close($log) or die "$build/build.log: close: $!\n";
 
     my @members = (@sources, "$repository/measCompApp/src/measCompDiscover.h",
+        "$repository/measCompApp/src/devMeasComp.dbd",
         "$repository/measCompApp/Db/measCompTemperatureIn.template",
         "$repository/measCompApp/Db/measCompBinaryIn.template",
         "$repository/measCompApp/Db/measCompAnalogIn.template",

@@ -63,6 +63,33 @@ Enum updates do not process output records or replay failed startup writes.
 Reapply configuration after an offline start as described above. ADC conversion
 coefficients are separate from enum metadata and selection conversion.
 
+## Analog conversion bounds
+
+`measCompAnalogIn.template` uses this repository's `measCompInt32Average`
+device support. It delegates sample averaging and I/O interrupt handling to
+asyn 4.45's `asynInt32Average`, and obtains ADC bounds separately through the
+public asynInt32 interface. A successful query with `high > low` confirms the
+bounds for the configured device's lifetime.
+
+If startup is offline, record processing retries the bounds query. LINEAR
+conversion remains INVALID until bounds are confirmed and a valid sample is
+available. Confirming bounds alone does not validate an input. Before conversion,
+the support calculates `ESLO=(EGUF-EGUL)/(high-low)` and
+`EOFF=(high*EGUL-low*EGUF)/(high-low)`. Changing `EGUF` or `EGUL` recalculates
+these coefficients; manual SLOPE coefficients remain under user control.
+
+Periodic and Passive records use asyn's accumulated-sample average; I/O Intr
+records retain its `SVAL` sample-count behavior. Missing samples and transport
+errors retain invalid input alarms. The floating-point temperature and voltage
+templates do not use this raw ADC conversion support.
+
+Rebuild the IOC with `measCompSupport.dbd`, which includes `devMeasComp.dbd`,
+and the asyn device support definitions. Custom raw analog templates need
+`DTYP="measCompInt32Average"` with the existing `@asyn` input link to obtain
+this behavior. After an offline start, apply the input Range and Type settings
+through their records once enums are available; failed PINI writes are not
+replayed by bounds recovery.
+
 ## Linux vendor dependency
 
 Linux builds require ULDAQ 1.2.2 with the TCP receive patch maintained by
@@ -105,6 +132,11 @@ They compare every enum state and actual record selection with public driver
 readback after online startup, offline startup and reconnect. An E-1608 case
 also connects while IOC record initialization is complete but enum callbacks
 are still disabled.
-Real hardware power cycling, ADC engineering-unit conversion, analog output
+Bounds cases verify TC32 24-bit metadata without claiming voltage acquisition.
+E-1608 cases pass 16-bit raw values 0, 32768 and 65535 through real ULDAQ,
+driver callbacks and periodic/I/O Intr analog records, then check coefficients
+and engineering-unit values after startup, changed limits and reconnect.
+They also check two-sample averaging, SLOPE preservation and missing samples.
+Real hardware power cycling, physical ADC calibration, analog output
 voltage, scan acquisition, EXP-32, USB, Windows and other models require
 separate verification.
