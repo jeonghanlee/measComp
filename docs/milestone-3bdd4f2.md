@@ -8,19 +8,19 @@ Git upstream: origin/site
 Remote tracker: [jeonghanlee/measComp milestone 1](https://github.com/jeonghanlee/measComp/milestone/1)
 GitHub milestone: Connection recovery and device selection
 Due date: none
-Remote milestone observed at: 2026-11-05T20:38:24Z; state: open; two closed issues and four open issues
+Remote milestone observed at: 2026-11-05T23:57:26Z; state: open; three closed issues and three open issues
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/1`.
 Baseline commit: 3bdd4f24d820579f3f423c7be968baf2bb413950
 
-Next session entry point: M3 implementation, verification and local review are accepted. Prepare its commit when requested; commit, push and issue #4 updates require their separate workflow steps. M1 and M2 are complete; M4 through M6 still require plan acceptance and implementation authorization.
+Next session entry point: Review M4's analog conversion plan for issue #5, confirming the supported mechanism for updating record conversion bounds before plan acceptance and implementation authorization. M1 through M3 are complete; M4 through M6 still require plan acceptance and implementation authorization.
 
 ## Scope
 
-This document assigns issues #2 through #7 to six work units for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. M1 and M2 are complete; M3 is in progress; M4 through M6 remain draft plans.
+This document assigns issues #2 through #7 to six work units for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. M1 through M3 are complete; M4 through M6 remain draft plans.
 
 The common integration environment is Linux with the real measComp driver, EPICS Base 7.0.10, asyn 4.45 and patched ULDAQ 1.2.2. Extend the shipped Perl/Bash tests and retain `tests/reconnect_ioc.cpp`; use external device protocol fixtures, without replacing internal driver, asyn or ULDAQ functions. Record the source commit, dependency identities, assertions, fixture requests and native IOC exit status for each executed check. Checks reproducing a defect must fail for the intended assertion on the affected baseline and pass on the fixed code; setup and build failures do not establish a regression. Compatibility checks and positive controls must pass on both the baseline and fixed code. When a check combines these purposes, record the defect assertion separately from its controls.
 
-Existing failure observations below come from the linked issues at the baseline commit. They are not successful verification of a fix. M1 and M2 record observed post-fix verification, repository landing and linked-issue closure. M3 records passing enum metadata and record-selection verification; its repository landing and issue closure remain pending. M4 through M6 remain pending. The analog metadata findings are separate from the normal floating-point TC32 temperature path. MAC rediscovery and same-IP/different-discovery-port selection retain their specific applicability conditions.
+Existing failure observations below come from the linked issues at the baseline commit. They are not successful verification of a fix. M1 through M3 record observed post-fix verification, repository landing and linked-issue closure. M4 through M6 remain pending. The analog metadata findings are separate from the normal floating-point TC32 temperature path. MAC rediscovery and same-IP/different-discovery-port selection retain their specific applicability conditions.
 
 **Out of scope:** ULDAQ vendor patch development, upstream submissions, release numbering, tags, deployment, output-command replay, and a general qualification of Windows, USB, EXP-32 or hardware power cycling. Changes to `docs/reconnection.md` and `tests/README.md` belong to the affected work unit when behavior or test invocation changes. Existing test limitations remain explicit.
 
@@ -32,12 +32,12 @@ Existing failure observations below come from the linked issues at the baseline 
 | --- | --- | --- | --- | --- | --- | --- |
 | M1 | TC write and readback consistency | Milestone | Complete | No | | Device and cache agree after a failed write and reconnect; [detail](#m1---tc-write-and-readback-consistency) |
 | M2 | Digital output failure handling | Milestone | Complete | No | | Transport errors disconnect and invalidate inputs before the next poll; [detail](#m2---digital-output-failure-handling) |
-| M3 | Analog enum initialization | Milestone | In progress | No | | Offline-start records obtain the same enums as online-start records; [detail](#m3---analog-enum-initialization) |
+| M3 | Analog enum initialization | Milestone | Complete | No | | Offline-start records obtain the same enums as online-start records; [detail](#m3---analog-enum-initialization) |
 | M4 | Analog conversion initialization | Milestone | Not started | Yes | | Offline-start conversion matches online-start conversion and measured raw values; [detail](#m4---analog-conversion-initialization) |
 | M5 | MAC device rediscovery | Milestone | Not started | Yes | | An initially absent MAC-selected device connects without disturbing existing ports; [detail](#m5---mac-device-rediscovery) |
 | M6 | Discovery endpoint identity | Milestone | Not started | Yes | | Devices sharing an IP but using different discovery ports remain independent; [detail](#m6---discovery-endpoint-identity) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: two Complete, one In progress and three Not started. `Ready` records dependency readiness only; the remaining draft plans still require acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
+The row order follows issue numbers and imposes no execution dependency. Current status: three Complete and three Not started. `Ready` records dependency readiness only; the remaining draft plans still require acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
 
 ### Milestone Details
 
@@ -229,7 +229,7 @@ Recheck metadata with `gh issue view 3 --repo jeonghanlee/measComp --json state,
 Origin: 3bdd4f2 / M3
 Identity History: none
 GitHub Issue: [#4](https://github.com/jeonghanlee/measComp/issues/4)
-Status: In progress
+Status: Complete
 
 ##### Summary
 
@@ -307,17 +307,19 @@ Documentation execution: from 2026-11-05T22:13:40Z to 22:14:50Z, the namespace s
 ##### Closure Evidence
 
 - Local review accepted on 2026-11-05 after first-person, third-person and second-person self-review: three direct passes in the available records, none delegated. The third-person pass checked the complete M3 change against its accepted plan, primary record/callback sources, retained negative controls and a fresh execution of the documented commands. The second-person pass checked the changed test guide, reconnection documentation and M3 detail against actual outputs. No unresolved findings remain; termination condition: no finding above the severity floor.
-- Enum publication, initial template states and selection-write regression are implemented locally and pass the recorded checks. Commit, remote landing and linked-issue update remain pending; M3 stays In progress until closure evidence is complete.
+- Enum publication, initial template states and selection-write regression are implemented and verified in d839e5ecfcef9a708fb72a24663c076a911573a9. The commit contains the reviewed eleven-file selection. No required check is waived.
+- Remote landing observed at 2026-11-05T22:21:59Z: after fetching origin, local HEAD and origin/site both resolved to d839e5ecfcef9a708fb72a24663c076a911573a9. Their full-tree comparison produced no differences, their ahead/behind counts were zero, and the working tree was clean. The GitHub branch API confirmed the same site commit at 2026-11-05T23:49:22Z. Recheck with `git -C /data/gitsrc/measComp fetch origin`, `git -C /data/gitsrc/measComp rev-parse HEAD origin/site` and `git -C /data/gitsrc/measComp diff HEAD origin/site`.
+- Issue #4 was closed as completed at 2026-11-05T23:57:15Z, observed at 2026-11-05T23:57:38Z. Its body matches the prepared implementation and verification record, with all five acceptance criteria checked. The completion comment matches the prepared outcome and references d839e5ecfcef9a708fb72a24663c076a911573a9. Required verification, repository landing and linked-issue closure are complete; no check or external condition is waived.
 
 ##### GitHub Projection
 
 Title: Refresh analog record enums after offline startup
 Labels: bug
 GitHub Milestone: Connection recovery and device selection
-Observed State: open
+Observed State: closed (completed)
 Observed Labels: bug
 Observed Milestone: Connection recovery and device selection (milestone 1)
-Last Compared: 2026-11-05T18:05:51Z; remote updated at 2026-11-05T18:05:18Z
+Last Compared: 2026-11-05T23:57:38Z; remote updated at 2026-11-05T23:57:15Z
 
 Recheck metadata with `gh issue view 4 --repo jeonghanlee/measComp --json state,labels,milestone,updatedAt`.
 
