@@ -15,8 +15,10 @@
 #include <dbStaticLib.h>
 #include <dbScan.h>
 #include <epicsExit.h>
+#include <unistd.h>
 #include <iocInit.h>
 #include <initHooks.h>
+#include <measCompDiscover.h>
 
 extern "C" int review_registerRecordDeviceDriver(DBBASE *);
 extern "C" int MultiFunctionConfig(const char *, const char *, int, int);
@@ -41,6 +43,14 @@ static void state(asynUser *port)
                 field("TEST:T0.PACT"), field("TEST:T0.UDF"), field("TEST:T0.SEVR"), value,
                 field("TEST:T31.SEVR"), field("TEST:T31.VAL"),
                 field("TEST:D0.SEVR"), field("TEST:D0.VAL"));
+}
+
+static void stateB(asynUser *port)
+{
+    int connected = -1;
+    pasynManager->isConnected(port, &connected);
+    std::printf("STATEB %d %.0f %.0f %.0f %.9g\n", connected, field("TEST:B0.PACT"),
+                field("TEST:B0.UDF"), field("TEST:B0.SEVR"), field("TEST:B0.VAL"));
 }
 
 static int writeSetting(const char *parameter, int value, int address = 0)
@@ -244,11 +254,13 @@ static void enumValue(int addr, const char *parameter, const char *record)
 int main(int argc, char **argv)
 {
     std::setvbuf(stdout, 0, _IONBF, 0);
-    if (argc != 5 && argc != 7) return 2;
+    if (argc != 5 && argc != 6 && argc != 7) return 2;
     bool enumMode = argc == 7;
+    bool secondPort = argc == 6;
     if (dbLoadDatabase(argv[1], 0, 0)) return 3;
     if (review_registerRecordDeviceDriver(pdbbase)) return 4;
     if (MultiFunctionConfig("DAQ", argv[3], 1, 1)) return 5;
+    if (secondPort && MultiFunctionConfig("DAQ2", argv[5], 1, 1)) return 5;
     if (enumMode) {
         if (!std::strncmp(argv[6], "bounds-", 7)) {
             if (loadBounds(argv[2], argv[5])) return 6;
@@ -258,10 +270,16 @@ int main(int argc, char **argv)
         if (dbLoadRecords(argv[2], "P=TEST:,R=T0,PORT=DAQ,ADDR=0,SCAN=I/O Intr,PREC=3")) return 6;
         if (dbLoadRecords(argv[2], "P=TEST:,R=T31,PORT=DAQ,ADDR=31,SCAN=I/O Intr,PREC=3")) return 6;
         if (dbLoadRecords(argv[4], "P=TEST:,R=D0,PORT=DAQ,ADDR=0,MASK=1")) return 6;
+        if (secondPort && dbLoadRecords(argv[2], "P=TEST:,R=B0,PORT=DAQ2,ADDR=0,SCAN=I/O Intr,PREC=3")) return 6;
     }
     if (iocInit()) return 7;
     asynUser *port = pasynManager->createAsynUser(0, 0);
     if (pasynManager->connectDevice(port, "DAQ", -1) != asynSuccess) return 8;
+    asynUser *portB = 0;
+    if (secondPort) {
+        portB = pasynManager->createAsynUser(0, 0);
+        if (pasynManager->connectDevice(portB, "DAQ2", -1) != asynSuccess) return 8;
+    }
     std::puts("READY");
     char command[200];
     while (std::fgets(command, sizeof(command), stdin)) {
@@ -284,6 +302,14 @@ int main(int argc, char **argv)
             std::printf("RESULT %ld\n", writeEnumRecord(record, value));
         else if (std::sscanf(command, "ENUMVALUE %d %63s %63s", &value, parameter, record) == 3)
             enumValue(value, parameter, record);
+        else if (!std::strncmp(command, "STATEB", 6)) {
+            if (portB) stateB(portB);
+            else std::puts("STATEB none");
+        }
+        else if (!std::strncmp(command, "SHOW", 4)) {
+            measCompShowDevices();
+            std::puts("SHOWEND");
+        }
         else if (!std::strncmp(command, "STATE", 5)) state(port);
         else if (std::sscanf(command, "DOUT %x %x", &digital, &mask) == 2)
             std::printf("RESULT %d\n", writeDigital("DIGITAL_OUTPUT", digital, mask));
@@ -310,6 +336,10 @@ int main(int argc, char **argv)
         else if (!std::strncmp(command, "QUIT", 4)) break;
         else std::puts("UNKNOWN");
     }
+    // With two ports the driver's exit handlers can destroy a port object while its poller thread
+    // still runs, which aborts some exits of the original driver as well.  The two-port cases end the
+    // process directly; the single-port cases keep the normal exit through the exit handlers.
+    if (portB) _exit(0);
     epicsExit(0);
     return 0;
 }

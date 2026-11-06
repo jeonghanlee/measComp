@@ -13,17 +13,40 @@
 #include <epicsGuard.h>
 #include <epicsMutex.h>
 #include <epicsStdio.h>
+#include <epicsTime.h>
 #include <measCompDiscover.h>
 
 #define MAX_DEVICES 100
 // All current Measurement Computing devices (E-1608, E-TC, TC32) use this port for
 // discovery.  But it is configurable so we allow the user to specify it.
 #define DEFAULT_DISCOVERY_PORT 54211
+// Minimum time in seconds between broadcast discovery attempts.  It is shorter than the driver's
+// five-second reconnect delay: a retry starts before it waits for the vendor-call lock, so the
+// refresh it triggers can start later than the retry itself, and an equal interval would skip every
+// second refresh under lock contention.  Ports retrying at different phases still share one refresh
+// per reconnect delay.
+#define INVENTORY_REFRESH_INTERVAL 4.0
 
 static DaqDeviceDescriptor measCompInventory[MAX_DEVICES];
 static int measCompNumDevices = 0;
 bool measCompInventoryInitialized = false;
 static epicsMutex inventoryMutex;
+// Monotonic time of the most recent broadcast discovery attempt, 0 before the first one.
+static epicsUInt64 lastDiscoveryAttempt = 0;
+
+#ifndef WIN32
+// Copies the IP address of an Ethernet device into the reserved field of its descriptor.
+// The device must not belong to a connected port: for a known descriptor the vendor library
+// returns the existing device object, and releasing it deletes that object.
+static void measCompReadIpAddress(DaqDeviceDescriptor& descriptor)
+{
+  if (descriptor.devInterface != ETHERNET_IFC) return;
+  DaqDeviceHandle devHandle = ulCreateDaqDevice(descriptor);
+  unsigned int maxLen = sizeof(descriptor.reserved);
+  ulDevGetConfigStr(devHandle, DEV_CFG_IP_ADDR_STR, 0, descriptor.reserved, &maxLen);
+  ulReleaseDaqDevice(devHandle);
+}
+#endif
 
 int measCompDiscoverDevices()
 {
@@ -32,6 +55,7 @@ int measCompDiscoverDevices()
   int status;
 
   if (measCompInventoryInitialized) return 0;
+  lastDiscoveryAttempt = epicsMonotonicGet();
   #ifdef WIN32
     cbIgnoreInstaCal();
     status = cbGetDaqDeviceInventory(ANY_IFC, measCompInventory, &numDevices);
@@ -51,12 +75,7 @@ int measCompDiscoverDevices()
     if (status) return status;
     // Copy the IP address to the reserved field for Ethernet devices.
     for (int i=0; i<numDevices; i++) {
-        if (measCompInventory[i].devInterface == ETHERNET_IFC) {
-            DaqDeviceHandle devHandle = ulCreateDaqDevice(measCompInventory[i]);
-            unsigned int maxLen = sizeof(measCompInventory[i].reserved);
-            ulDevGetConfigStr(devHandle, DEV_CFG_IP_ADDR_STR, 0, measCompInventory[i].reserved, &maxLen);
-            ulReleaseDaqDevice(devHandle);
-        }
+        measCompReadIpAddress(measCompInventory[i]);
     }
   #endif
   if (status) {
@@ -95,6 +114,62 @@ void measCompShowDevices()
       printf("       Reserved: %s\n",   measCompInventory[i].reserved);
     }
   #endif
+}
+
+// Returns the inventory index of the device with this unique ID, or -1 if it is not in the inventory.
+static int measCompFindDevice(const char *uniqueId)
+{
+  for (int i=0; i<measCompNumDevices; i++) {
+    #ifdef WIN32
+      if (strcmp(uniqueId, measCompInventory[i].UniqueID) == 0) return i;
+    #else
+      if (strcmp(uniqueId, measCompInventory[i].uniqueId) == 0) return i;
+    #endif
+  }
+  return -1;
+}
+
+// Queries Ethernet devices with a new broadcast and appends those whose unique ID is not yet in the
+// inventory.  Known entries, their order and their vendor device objects are never touched, so the
+// handles of connected ports stay valid.  Returns at once when less than INVENTORY_REFRESH_INTERVAL
+// has passed since the last discovery attempt.  Returns the number of appended entries.
+static int measCompRefreshInventory()
+{
+  epicsUInt64 now = epicsMonotonicGet();
+  DaqDeviceDescriptor found[MAX_DEVICES];
+  int added = 0;
+  #ifdef WIN32
+    int numFound = MAX_DEVICES;
+  #else
+    unsigned int numFound = MAX_DEVICES;
+  #endif
+
+  if (lastDiscoveryAttempt &&
+      (now - lastDiscoveryAttempt)/1.e9 < INVENTORY_REFRESH_INTERVAL) return 0;
+  lastDiscoveryAttempt = now;
+  #ifdef WIN32
+    cbIgnoreInstaCal();
+    if (cbGetDaqDeviceInventory(ETHERNET_IFC, found, &numFound)) return 0;
+  #else
+    if (ulGetDaqDeviceInventory(ETHERNET_IFC, found, &numFound)) return 0;
+  #endif
+  for (int i=0; i<(int)numFound; i++) {
+    #ifdef WIN32
+      if (measCompFindDevice(found[i].UniqueID) != -1) continue;
+    #else
+      if (measCompFindDevice(found[i].uniqueId) != -1) continue;
+    #endif
+    if (measCompNumDevices >= MAX_DEVICES) {
+      printf("Device inventory is full\n");
+      break;
+    }
+    #ifndef WIN32
+      measCompReadIpAddress(found[i]);
+    #endif
+    measCompInventory[measCompNumDevices++] = found[i];
+    added++;
+  }
+  return added;
 }
 
 /** Create a measComp device.
@@ -188,16 +263,12 @@ int measCompCreateDevice(std::string uniqueId, DaqDeviceDescriptor& deviceDescri
   }
   else {
     // uniqueId was not an IP address or IP DNS name, so it must be a serial number (USB) or MAC address (Ethernet)
-    // Search the inventory for the matching UniqueID
-    for (int i=0; i<measCompNumDevices; i++) {
-      #ifdef WIN32
-        if (uniqueId.compare(measCompInventory[i].UniqueID) == 0) {
-      #else
-        if (uniqueId.compare(measCompInventory[i].uniqueId) == 0) {
-      #endif
-        devIndex = i;
-        break;
-      }
+    // Search the inventory for the matching UniqueID.  A MAC address that is not in the inventory
+    // triggers one bounded refresh, because the device may have become available after the
+    // previous discovery.
+    devIndex = measCompFindDevice(uniqueId.c_str());
+    if (devIndex == -1 && isEthernet && measCompRefreshInventory() > 0) {
+      devIndex = measCompFindDevice(uniqueId.c_str());
     }
   }
   if (devIndex != -1) {

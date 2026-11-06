@@ -38,7 +38,8 @@ For an uninstalled ULDAQ build, use its `src` directory for headers and
 hashes and sets runtime library search paths to the supplied library directories.
 Do not override those directories with an unrelated `LD_LIBRARY_PATH`.
 
-Enter an isolated namespace and create the two documentation-only addresses:
+Enter an isolated namespace and create the documentation-only addresses. The
+third address serves only the second device of the two-port MAC case:
 
 ```bash
 unshare -Urn bash
@@ -47,6 +48,7 @@ ip link add sim0 type dummy
 ip addr add 192.0.2.1/24 dev sim0
 ip link set sim0 up
 ip addr add 192.0.2.2/32 dev lo
+ip addr add 192.0.2.3/32 dev lo
 ```
 
 Run the test inside that shell, then leave the namespace:
@@ -204,6 +206,81 @@ must reach the raw-32768 response and fail its startup engineering-value
 assertion. Setup errors or absent sample traffic do not count as detecting
 the conversion defect.
 
+## MAC rediscovery cases
+
+Repeat the namespace setup above, including the third address, and use the
+existing `BUILD`. Each case starts a fresh IOC and one or two external TC32
+fixtures. The IOC selects each device by its MAC address, so the real driver
+finds it through broadcast discovery. The fixtures answer broadcast discovery
+only in these cases; every other case selects the device by IP address.
+
+```bash
+export TEMPLATE="$PWD/measCompApp/Db/measCompTemperatureIn.template"
+export IOC="$BUILD/reconnect-ioc"
+export DBD="$BUILD/reconnect.dbd"
+export RUNNER="$PWD/tests/test_reconnect.pl"
+timeout 150s perl "$RUNNER" --case mac-tc32-online "$IOC" "$DBD" "$TEMPLATE" "$BUILD/mo-on.log"
+timeout 150s perl "$RUNNER" --case mac-tc32-offline "$IOC" "$DBD" "$TEMPLATE" "$BUILD/mo-off.log"
+timeout 150s perl "$RUNNER" --case mac-two-ports "$IOC" "$DBD" "$TEMPLATE" "$BUILD/mo-two.log"
+timeout 150s perl "$RUNNER" --case mac-known-absent "$IOC" "$DBD" "$TEMPLATE" "$BUILD/mo-known.log"
+exit
+```
+
+`mac-tc32-offline` starts with the device absent and observes the port
+disconnected with INVALID input for eleven seconds while the fixture records
+every broadcast discovery request. It then makes the device available and
+requires a valid 22.5 C reading within twelve seconds. The recorded requests
+must number two or three, at least 3.9 seconds apart: the startup discovery
+plus the refreshes allowed by the four-second minimum interval, less a
+tolerance. The driver's five-second reconnect delay makes the actual spacing
+about five seconds.
+
+`mac-tc32-online` starts with the device present. The startup discovery must
+be the only discovery request through an idle interval, an EOF and reconnect,
+and two twelve-second periods with the device absent, one with auto-connect
+disabled and one with the port disabled. The device must reconnect from its
+known inventory entry in every case.
+
+`mac-two-ports` runs two ports on separate fixtures with different MAC
+addresses and temperatures, 22.5 C and 37.25 C. The first device is present at
+startup and the second is absent. Both fixtures must see the same bounded
+discovery requests during the absence. When the second device becomes
+available it must connect with its own value within eight seconds, which a
+refresh skipped because of the lock wait would exceed, while the first port
+keeps its single connection and its value. From the moment the first port is
+healthy until the end, including every refresh while the second device is
+absent, it must never go three seconds without a request. The inventory
+listing must contain exactly the two MAC addresses.
+
+`mac-known-absent` uses the same two fixtures, but takes the first device
+offline with an EOF before the second device becomes available. The second
+device must connect while the first is silent to the refresh broadcast, the
+inventory listing must still contain both MAC addresses, and the first port
+must reconnect from its inventory entry with a valid reading and without
+another discovery request.
+
+The two-port cases end the IOC directly and check only that it stops on
+request. With two ports the driver's exit handlers can destroy a port object
+while its poller thread still runs. A scratch variant of `mac-two-ports` with
+both devices present from the start and the normal exit, run 15 times against
+each driver and not kept in the repository, aborted once with the original
+driver and once with the fixed driver, so the race is not part of this change.
+The cases with one port keep the normal exit through the exit handlers and
+still require exit status zero.
+
+The Ethernet-only restriction of the refresh is not exercised, because the
+namespace has no USB device; it is established by reading the source.
+
+The original-behavior control builds the IOC from the original
+`measCompDiscover.cpp` with the final tests and fixtures. Use a scratch copy of
+the repository in which only `measCompApp/src/measCompDiscover.cpp` is restored
+to its original content, because `build_reconnect.pl` compiles the sources of
+the repository that holds the running tests. The online case must pass. The
+offline case must fail at the connection deadline with the port still
+disconnected, and the two-port and known-absent cases must fail at the second
+port's connection deadline. Build or setup errors do not count as detecting the
+defect.
+
 ## Negative controls
 
 Apply each change separately to a scratch copy of the named source, rebuild
@@ -226,6 +303,14 @@ driver defect.
 | `enum-address-zero` | Publish enums only at address 0 | `startup TEST:A7Range record enums` in `enum-e1608-offline` |
 | `early-enum-callback` | Publish before `interruptAccept` without deferring | `startup TEST:A0Range record enums` in `enum-e1608-init` |
 | `no-initial-enum` | Remove the initial `Unavailable` labels from the templates | `startup TEST:A0Range selection 0 maps to 1` in `enum-e1608-offline` |
+| `no-mac-refresh` | Skip the inventory refresh in the MAC branch of `measCompCreateDevice` | Connection deadline in `mac-tc32-offline` |
+| `refresh-releases-known` | After a refresh, repeat the IP address read for every inventory entry | `mac first port keeps its connection` in `mac-two-ports`; connection deadline of the first port in `mac-known-absent` |
+| `refresh-rereads-known` | Repeat the IP address read for refreshed devices that are already known | `mac first port keeps its connection` in `mac-two-ports` |
+| `refresh-no-dedupe` | Append every refreshed descriptor without comparing unique IDs | `mac first port keeps its connection` in `mac-two-ports` |
+| `refresh-drops-known` | Replace the inventory with the devices that answer the refresh | `mac inventory keeps the absent known device` in `mac-known-absent` |
+| `refresh-no-throttle` | Set the minimum interval between discovery attempts to zero | `mac rediscovery requests while absent` in `mac-tc32-offline`; `mac absent port shares bounded discovery` in `mac-two-ports` |
+| `refresh-stalls-ports` | Hold the vendor lock for four seconds in every refresh | `mac first port continues polling` in `mac-two-ports` |
+| `refresh-interval-equals-retry` | Set the minimum interval between discovery attempts to five seconds | `mac second device connects with its own value` in `mac-two-ports` when a refresh is skipped; the result varies with the retry phase |
 
 This test does not establish hardware power-cycle behavior, sustained network
 loss endurance, Channel Access client reconnection, EXP-32, USB or Windows support.

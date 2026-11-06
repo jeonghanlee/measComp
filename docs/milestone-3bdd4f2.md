@@ -12,15 +12,15 @@ Remote milestone observed at: 2026-11-06T08:23:21Z; state: open; four closed iss
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/1`.
 Baseline commit: 3bdd4f24d820579f3f423c7be968baf2bb413950
 
-Next session entry point: M1 through M4 are complete and landed on `origin/site`. M5 (issue #6) and M6 (issue #7) remain draft plans; accept a plan and record implementation authorization before starting either.
+Next session entry point: Prepare M5's repository changes for commit. The four MAC cases pass on the fixed driver, the original driver fails the three absent-device cases at their connection deadlines, and the 14 existing cases pass unchanged. Landing and issue #6 closure remain pending. M6 remains a draft plan.
 
 ## Scope
 
-This document assigns issues #2 through #7 to six work units for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. M1 through M4 are complete; M5 and M6 remain draft plans.
+This document assigns issues #2 through #7 to six work units for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. M1 through M4 are complete; M5 is in progress; M6 remains a draft plan.
 
 The common integration environment is Linux with the real measComp driver, EPICS Base 7.0.10, asyn 4.45 and patched ULDAQ 1.2.2. Extend the shipped Perl/Bash tests and retain `tests/reconnect_ioc.cpp`; use external device protocol fixtures, without replacing internal driver, asyn or ULDAQ functions. Record the source commit, dependency identities, assertions, fixture requests and native IOC exit status for each executed check. Checks reproducing a defect must fail for the intended assertion on the affected baseline and pass on the fixed code; setup and build failures do not establish a regression. Compatibility checks and positive controls must pass on both the baseline and fixed code. When a check combines these purposes, record the defect assertion separately from its controls.
 
-Existing failure observations below come from the linked issues at the baseline commit. They are not successful verification of a fix. M1 through M4 record observed post-fix verification, repository landing and linked-issue closure. M5 and M6 remain unimplemented. The analog metadata findings are separate from the normal floating-point TC32 temperature path. MAC rediscovery and same-IP/different-discovery-port selection retain their specific applicability conditions.
+Existing failure observations below come from the linked issues at the baseline commit. They are not successful verification of a fix. M1 through M4 record observed post-fix verification, repository landing and linked-issue closure. M5 records local verification with landing and closure pending; M6 remains unimplemented. The analog metadata findings are separate from the normal floating-point TC32 temperature path. MAC rediscovery and same-IP/different-discovery-port selection retain their specific applicability conditions.
 
 **Out of scope:** ULDAQ vendor patch development, upstream submissions, release numbering, tags, deployment, output-command replay, and a general qualification of Windows, USB, EXP-32 or hardware power cycling. Changes to `docs/reconnection.md` and `tests/README.md` belong to the affected work unit when behavior or test invocation changes. Existing test limitations remain explicit.
 
@@ -34,10 +34,10 @@ Existing failure observations below come from the linked issues at the baseline 
 | M2 | Digital output failure handling | Milestone | Complete | No | | Transport errors disconnect and invalidate inputs before the next poll; [detail](#m2---digital-output-failure-handling) |
 | M3 | Analog enum initialization | Milestone | Complete | No | | Offline-start records obtain the same enums as online-start records; [detail](#m3---analog-enum-initialization) |
 | M4 | Analog conversion initialization | Milestone | Complete | No | | Offline-start conversion matches online-start conversion and measured raw values; [detail](#m4---analog-conversion-initialization) |
-| M5 | MAC device rediscovery | Milestone | Not started | Yes | | An initially absent MAC-selected device connects without disturbing existing ports; [detail](#m5---mac-device-rediscovery) |
+| M5 | MAC device rediscovery | Milestone | In progress | No | | An initially absent MAC-selected device connects without disturbing existing ports; [detail](#m5---mac-device-rediscovery) |
 | M6 | Discovery endpoint identity | Milestone | Not started | Yes | | Devices sharing an IP but using different discovery ports remain independent; [detail](#m6---discovery-endpoint-identity) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: four Complete and two Not started. `Ready` records dependency readiness only; the remaining draft plans still require acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
+The row order follows issue numbers and imposes no execution dependency. Current status: four Complete, one In progress and one Not started. `Ready` records dependency readiness only; the remaining draft plan still requires acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
 
 ### Milestone Details
 
@@ -412,7 +412,7 @@ Recheck metadata with `gh issue view 5 --repo jeonghanlee/measComp --json state,
 Origin: 3bdd4f2 / M5
 Identity History: none
 GitHub Issue: [#6](https://github.com/jeonghanlee/measComp/issues/6)
-Status: Not started
+Status: In progress
 
 ##### Summary
 
@@ -436,7 +436,7 @@ Out of scope: replacing explicit IP selection, changing MAC syntax, and continuo
 ##### Dependencies And Decisions
 
 - None. Shared inventory code with M6 requires compatible changes, not an invented prerequisite order.
-- Decision Date: 2026-11-06. Refresh runs only inside the MAC branch of `measCompCreateDevice()` when the requested MAC is absent from the inventory. A process-wide minimum interval of 5 seconds between discovery attempts, equal to the driver's reconnect delay, bounds it. Retries stay driven by each port's existing reconnect gate, auto-connect and enable policy; no new thread or timer is added.
+- Decision Date: 2026-11-06. Refresh runs only inside the MAC branch of `measCompCreateDevice()` when the requested MAC is absent from the inventory. A process-wide minimum interval of 4 seconds between discovery attempts bounds it. The interval is shorter than the driver's five-second reconnect delay by decision of 2026-11-06, revised at the owner's direction after the implementation review: a retry starts before it waits for the vendor-call lock, so with an equal interval the refresh was skipped in three of four two-port runs and the second device connected after about 9.3 seconds instead of about 4.4 seconds; with four seconds all four runs connected after about 4.4 seconds. Retries stay driven by each port's existing reconnect gate, auto-connect and enable policy; no new thread or timer is added.
 - Decision Date: 2026-11-06. Refresh merges by appending unknown unique IDs only and never repeats the IP-copy step on known entries. In ULDAQ 1.2.2, `ulCreateDaqDevice()` returns the existing device object for a known descriptor and `ulReleaseDaqDevice()` deletes it, so rerunning the current inventory loop would delete another port's live device.
 - Decision Date: 2026-11-06. The Windows branch follows the same structure and is not verified, consistent with this milestone's Windows exclusion.
 - Behavioral constraints recovered on 2026-11-06 from ULDAQ 1.2.2 `NetDiscovery.cpp` and the driver: a broadcast query waits 250 ms per non-loopback IPv4 interface while the inventory lock and the driver's global vendor-call lock are held; a broadcast query rebuilds ULDAQ's automatic discovery list from responding devices only, and established devices reconnect from their last discovery information. Refresh therefore queries Ethernet devices only and stays throttled.
@@ -444,38 +444,54 @@ Out of scope: replacing explicit IP selection, changing MAC syntax, and continuo
 ##### Implementation Plan
 
 Plan Status: accepted
-Plan Acceptance: 2026-11-06; accepted by the owner after the discovery code, the ULDAQ 1.2.2 discovery and device-management sources and the existing test harness were read in full; no separate plan review was held.
-Implementation Authorization: 2026-11-06; implement and verify the accepted plan items 1 to 6.
+Plan Acceptance: 2026-11-06; accepted by the owner after the discovery code, the ULDAQ 1.2.2 discovery and device-management sources and the existing test harness were read in full; no separate plan review was held. Amended 2026-11-06 at the owner's direction to apply every finding of the implementation review: plan item 6 adds the case `mac-known-absent`, T2 and T3 gain assertions, T5 is new, and the minimum refresh interval is 4 seconds with a 3.9-second spacing check and an 8-second limit for the second device in T3.
+Implementation Authorization: 2026-11-06; implement and verify the accepted plan items 1 to 6, including the amendment above.
 Superseded Plan Artifacts: none
 
-1. In `measCompApp/src/measCompDiscover.cpp`, record the monotonic time of every discovery attempt, including the startup one. Add an internal refresh that returns at once when less than 5 seconds have passed since the last attempt; otherwise it queries Ethernet devices only, into a temporary array, through `ulGetDaqDeviceInventory(ETHERNET_IFC, ...)`. Verified by the T1 spacing and T2 no-refresh assertions.
+1. In `measCompApp/src/measCompDiscover.cpp`, record the monotonic time of every discovery attempt, including the startup one. Add an internal refresh that returns at once when less than 4 seconds have passed since the last attempt; otherwise it queries Ethernet devices only, into a temporary array, through `ulGetDaqDeviceInventory(ETHERNET_IFC, ...)`. Verified by the T1 spacing and T2 no-refresh assertions.
 2. Append only descriptors whose unique ID is absent from the inventory, up to the inventory limit, and read the IP address only for those new entries. Existing entries, their indices and vendor device objects are never touched. Verified by T3 connection continuity and distinct inventory entries.
 3. In the MAC branch of `measCompCreateDevice()`, search the inventory; when the MAC is absent, refresh once and search again. The direct-IP branch and the startup discovery behavior are unchanged. Verified by T1 and T4.
-4. Document MAC rediscovery in `docs/reconnection.md`: the trigger, the 5-second bound, the Ethernet-only scope, the brief wait other vendor calls incur during a broadcast, and unchanged IP selection.
+4. Document MAC rediscovery in `docs/reconnection.md`: the trigger, the 4-second bound, the Ethernet-only scope, the brief wait other vendor calls incur during a broadcast, and unchanged IP selection.
 5. Extend `tests/TC32.pm`: an opt-in broadcast listener that replies from the address-bound socket, an optional MAC, and timestamped discovery-request evidence. Broadcast replies stay off by default so existing direct-IP cases keep their path. Verified by T4.
-6. Extend `tests/reconnect_ioc.cpp` and `tests/test_reconnect.pl`: a device identifier argument, an optional second port, per-port state and an inventory listing command. Add cases `mac-tc32-offline`, `mac-tc32-online` and `mac-two-ports`, with their commands and negative controls in `tests/README.md`. Verified by T1 to T3 on the fixed and original drivers.
+6. Extend `tests/reconnect_ioc.cpp` and `tests/test_reconnect.pl`: a device identifier argument, an optional second port, per-port state and an inventory listing command. Add cases `mac-tc32-offline`, `mac-tc32-online`, `mac-two-ports` and `mac-known-absent`, with their commands and negative controls in `tests/README.md`. The two-port cases end the IOC directly and check only that it stops on request; the reason is recorded under Verification Results. Verified by T1 to T3 and T5 on the fixed and original drivers.
 
 ##### Test Plan
 
 | Label | Layer | Method | Environment | Expected Result |
 | --- | --- | --- | --- | --- |
-| T1 | Integration | Start the IOC with the TC32 MAC as the device identifier while the fixture is absent. Record every received discovery request with its monotonic time, then enable the fixture. Repeat with the original driver and identical harness. | Common integration environment; isolated network namespace; TC32 fixture with broadcast replies enabled | Fixed driver: the port is disconnected with INVALID input while the device is absent, consecutive discovery requests are at least 4.9 seconds apart, and the port connects with a valid 22.5 temperature within 12 seconds of enabling the fixture. Original driver: sends only the startup discovery request and fails the connection deadline. |
-| T2 | Regression | Start the same MAC-selected fixture online, check the connection, inject EOF and recover, then disable auto-connect with the fixture absent and observe 12 seconds. | Same environment | Online startup connects with no discovery request after the first; EOF recovery reconnects from the existing descriptor; with auto-connect disabled no discovery request or connection occurs. The original driver passes the same assertions. |
-| T3 | Integration | Run two ports: port A (MAC A, online at start, 22.5) and port B (MAC B, absent, 37.25). When A is healthy, enable B. Record connection counts, request streams and the inventory listing. | Same environment; two external fixtures at distinct addresses | B connects with 37.25 within 12 seconds; A keeps its single connection, keeps 22.5 and continues to poll after B appears; the inventory lists exactly two distinct unique IDs; neither fixture reports unsupported requests. |
+| T1 | Integration | Start the IOC with the TC32 MAC as the device identifier while the fixture is absent. Record every received discovery request with its monotonic time, then enable the fixture. Repeat with the original driver and identical harness. | Common integration environment; isolated network namespace; TC32 fixture with broadcast replies enabled | Fixed driver: the port is disconnected with INVALID input while the device is absent, consecutive discovery requests are at least 3.9 seconds apart, and the port connects with a valid 22.5 temperature within 12 seconds of enabling the fixture. Original driver: sends only the startup discovery request and fails the connection deadline. |
+| T2 | Regression | Start the same MAC-selected fixture online, check the connection, inject EOF and recover, then disable auto-connect with the fixture absent and observe 12 seconds, and repeat with the port disabled instead. | Same environment | Online startup connects with no discovery request after the first; EOF recovery reconnects from the existing descriptor; with auto-connect disabled or the port disabled no discovery request or connection occurs. The original driver passes the same assertions. |
+| T3 | Integration | Run two ports: port A (MAC A, online at start, 22.5) and port B (MAC B, absent, 37.25). When A is healthy, enable B. Record connection counts, request streams and the inventory listing. | Same environment; two external fixtures at distinct addresses | B connects with 37.25 within 8 seconds; A keeps its single connection, keeps 22.5 and never goes 3 seconds without a request from the moment it is healthy; the inventory lists exactly two distinct unique IDs; neither fixture reports unsupported requests. |
 | T4 | Regression | Run the shipped reconnect, digital, enum and bounds cases, and check Perl syntax, POD, module loading and help/invalid-usage on Debian 13 and Rocky 8. | Same environment; Perl 5.40.1 and 5.26.3 | All existing assertions pass unchanged with normal IOC exit, and both interpreters accept the test tools. |
+| T5 | Integration | Run the two ports of T3, but take A offline with an EOF before enabling B. Enable B, list the inventory, then make A available again. | Same environment; two external fixtures | B connects with 37.25 while A is silent to the refresh broadcast; the inventory still lists both unique IDs; A reconnects from its inventory entry with 22.5 and without another discovery request; B keeps its single connection. |
 
 ##### Verification Results
 
 | Label | Observed At | Environment | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| T1 | Not run | Common integration environment | Pending | None |
-| T2 | Not run | Common integration environment | Pending | None |
-| T3 | Not run | Common integration environment | Pending | None |
-| T4 | Not run | Common integration environment | Pending | None |
+| T1 | 2026-11-06T16:39:10Z to 16:44:14Z (fixed, README blocks); 16:45:02Z to 16:59:48Z (original and variants) | Debian 13; real IOC, Base 7.0.10, asyn 4.45.0, patched ULDAQ 1.2.2; TC32 fixture selected by MAC with broadcast replies | Pass: `mac-tc32-offline` 6 assertions on the fixed driver. Three broadcast discovery requests while absent, 5.09 seconds apart; connected with a valid 22.5 within 3.75 seconds of enabling the fixture; six repeated runs passed with the same values. The original driver fails at the connection deadline with the port disconnected and INVALID. | `work/m5-mac/r8/build/`; `work/m5-mac/r8/v-baseline/` |
+| T2 | Same intervals | Same environment | Pass: `mac-tc32-online` 14 assertions on both drivers. The startup discovery is the only request through an idle interval, an EOF reconnect, a 12-second window with auto-connect disabled, a 12-second window with the port disabled, and both recoveries; every reconnect uses the known inventory entry. | Same directories |
+| T3 | Same intervals | Same environment; two TC32 fixtures with different MACs | Pass: `mac-two-ports` 8 assertions on the fixed driver. Both fixtures see three shared discovery requests during the absence, 5.55 and 5.39 seconds apart; the second device connects with 37.25 within 4.35 seconds (limit 8); the first port keeps its single connection and 22.5, and its longest pause between requests from the moment it was healthy is 0.70 seconds (limit 3); the inventory lists exactly the two MACs. Ten repeated runs passed, connecting after 4.26 to 4.50 seconds, with the closest two refreshes 4.87 seconds apart. The original driver fails at the second port's connection deadline. | Same directories |
+| T4 | Same intervals | Same environment; Debian 13 Perl 5.40.1; Rocky 8 Perl 5.26.3 | Pass: the 14 existing cases pass 995 assertions with every IOC exit 0 (reconnect 38; digital 11, 12, 17, 15; enum 55, 56, 175, 176, 178; bounds 22, 25, 106, 109). Syntax, POD, module loading and help/invalid-usage checks pass on both Perl versions. | `work/m5-mac/r8/build/`; `perl-debian13.txt`; `perl-rocky8.txt` |
+| T5 | Same intervals | Same environment; two TC32 fixtures with different MACs | Pass: `mac-known-absent` 7 assertions on the fixed driver. The second device connects after 6.48 seconds while the first is silent to the refresh broadcast; the inventory still lists both MACs; the first port reconnects from its entry with 22.5 and without another discovery request; the second keeps its single connection. Ten repeated runs passed after 6.48 to 6.73 seconds. The original driver fails at the second port's connection deadline. | Same directories |
+
+Source identity of the final run: `measCompDiscover.cpp` SHA-256 `b08b9fb3e3ae6c3c63bfdca2fe97cef0ad9dd81729bc405ee104aee41c7b8fb7`; `test_reconnect.pl` `654460900c4ee3437e76735d04cc83f493efae12804d16e155cda1d659af47e8`; `TC32.pm` `4276c4b0c0714604040ce9fe842414ed6d84415aeed65ab86a9d72290d179728`; `E1608.pm` `621e8daa6c1cad55010dcaa381c3f4722913054c83585d60ab3c1d91f791f930`; `reconnect_ioc.cpp` `e8d863c8ccc15091688e04d18a1de0e5b18596578121aea8f352a57843ba9870`; patched ULDAQ library `6ff4e93258081a8936416698a798ffdd5536255deb8a2d681344fc4bc86439e4`. The 19 build input hashes were rechecked unchanged after execution. The original driver is the committed `1a06b5d` discovery source built with the same final test bytes.
+
+Negative controls on scratch copies of the final tree failed at the intended assertion: `no-mac-refresh` at the connection deadline in `mac-tc32-offline`; `refresh-releases-known` at `mac first port keeps its connection` in `mac-two-ports` and at the first port's connection deadline in `mac-known-absent`; `refresh-rereads-known` and `refresh-no-dedupe` at `mac first port keeps its connection` in `mac-two-ports`, which shows the vendor library deleting a connected port's device object on a repeated IP read; `refresh-drops-known` at `mac inventory keeps the absent known device` in `mac-known-absent`; `refresh-no-throttle` (interval zero) at `mac rediscovery requests while absent` in `mac-tc32-offline` and at `mac absent port shares bounded discovery` in `mac-two-ports`; `refresh-stalls-ports` at `mac first port continues polling` in `mac-two-ports`. `refresh-interval-equals-retry` (five seconds) failed `mac second device connects with its own value` in five of six runs; the sixth run met the retry phase that avoids a skipped refresh. Evidence is under `work/m5-mac/r8/`.
+
+Limit of the two-port cases: they end the IOC with `_exit` and check only that it stops on request. With two ports the driver's exit handlers can destroy a port object while its poller thread still runs; in 15 runs of a scratch scenario with both devices present from the start, the original driver and the fixed driver each aborted once on the normal exit. This race is not part of this work.
+
+Phase check of the shared refresh: with both devices absent and the second port started 0, 2.5 and 4.5 seconds after the first, the fixture saw 3, 3 and 4 broadcast discovery requests. The requests after the startup one were 5.07 to 5.09 seconds apart, except the first refresh at 4.77 seconds when the second port started 4.5 seconds late. That is one refresh per reconnect delay, not one per port. These runs used a scratch variant of the test IOC that delays the second port and a scratch test that waits eleven seconds; they are not part of the shipped cases. Evidence: `work/m5-mac/r9/offset/` and `work/m5-mac/r8/scratch-absent/`.
+
+Unverified consumer: `drvUSBCTR.cpp`, the other caller of `measCompCreateDevice()`, could not be compiled in this environment because the header `drvMca.h` of another module is missing. The declaration and signature of the function are unchanged, and the refresh applies only to identifiers that are not USB serial numbers.
+
+Sanitizer check: the four MAC cases pass on a test IOC built with AddressSanitizer and UBSan, with zero reports from either. Evidence: `work/m5-mac/r10/`.
 
 ##### Closure Evidence
 
-- None. No fix or successful post-fix verification is recorded.
+- Local implementation and verification are recorded; commit, landing and issue closure remain pending. All required checks passed and none is waived.
+- Review: a third-person review in the author's stance, not independent of the author's session, read the complete change and re-ran it by execution from README commands extracted verbatim, with variants the author had not written. It reported two minor findings, three informational findings and one observation outside its scope; the owner ordered all of them applied. The review also showed that the first fix of the polling check missed a four-second stall, which was corrected and re-checked. Applying the findings added the case `mac-known-absent` and further assertions. The later runs showed that a refresh interval equal to the retry delay skipped refreshes under vendor-lock contention, and the owner chose a 4-second interval. Five further passes in the author's stance followed, four second-person and one third-person with a sanitizer build, and the last pass of each person returned no finding above the floor.
+- Evidence: `work/m5-mac/` retains the builds with command and input hashes, the UTC intervals, stdout, stderr, JSON and native runner status of every case, and the negative-control runs. These are local evidence paths; reproduce with the shipped builder and the cases in `tests/README.md`.
 
 ##### GitHub Projection
 
@@ -485,7 +501,7 @@ GitHub Milestone: Connection recovery and device selection
 Observed State: open
 Observed Labels: bug
 Observed Milestone: Connection recovery and device selection (milestone 1)
-Last Compared: 2026-11-06T09:37:46Z; remote updated at 2026-11-06T09:36:00Z
+Last Compared: 2026-11-06T18:37:17Z; remote updated at 2026-11-06T18:37:11Z
 
 Recheck metadata with `gh issue view 6 --repo jeonghanlee/measComp --json state,labels,milestone,updatedAt`.
 

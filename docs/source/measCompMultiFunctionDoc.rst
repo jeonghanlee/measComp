@@ -562,6 +562,9 @@ The uniqueID is a string that identifies the device to be controlled.
   or the IP address (e.g. "10.54.160.63", or the IP DNS name (e.g. "gse-e1601-1").
   The MAC address, IP address or IP name can be used for devices on the local subnet,
   while the IP address or IP name must be used for devices on other subnets.
+  A device selected by its MAC address does not have to be powered when the IOC starts:
+  the driver keeps retrying and connects when the device appears on the local subnet
+  (see docs/reconnection.md, section "MAC device rediscovery").
 
 The measComp module comes with example iocBoot/ directories that contain
 example startup scripts and example substitutions files for each supported model.

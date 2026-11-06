@@ -14,19 +14,31 @@ my $HEADER_LENGTH = 6;
 my $TIMEOUT_HOLD = 10;
 
 sub new {
-    my ($class, $address, $port) = @_;
+    my ($class, $address, $port, $options) = @_;
     $address //= $DEFAULT_ADDRESS;
     $port //= $DEFAULT_PORT;
-    my $udp = IO::Socket::INET->new(LocalAddr => $address, LocalPort => $port, Proto => 'udp')
+    $options //= {};
+    # The address-bound and wildcard UDP sockets share the discovery port only
+    # when both set SO_REUSEADDR, so the option is set only for broadcast mode.
+    my $udp = IO::Socket::INET->new(LocalAddr => $address, LocalPort => $port, Proto => 'udp',
+        ReuseAddr => $options->{broadcast} ? 1 : 0)
         or die "$address:$port: UDP bind: $!\n";
     my $tcp = IO::Socket::INET->new(LocalAddr => $address, LocalPort => $port,
         Proto => 'tcp', Listen => 5, ReuseAddr => 1)
         or die "$address:$port: TCP bind: $!\n";
+    my $broadcast;
+    if ($options->{broadcast}) {
+        $broadcast = IO::Socket::INET->new(LocalAddr => '0.0.0.0', LocalPort => $port, Proto => 'udp',
+            ReuseAddr => 1)
+            or die "0.0.0.0:$port: UDP broadcast bind: $!\n";
+        $broadcast->blocking(0);
+    }
     $udp->blocking(0);
     $tcp->blocking(0);
     return bless {
-        address => $address, port => $port, udp => $udp, tcp => $tcp,
-        readers => IO::Select->new($udp, $tcp), clients => {},
+        address => $address, port => $port, udp => $udp, tcp => $tcp, broadcast => $broadcast,
+        mac => $options->{mac}, discovery_requests => [],
+        readers => IO::Select->new($udp, $tcp, $broadcast // ()), clients => {},
         online => 0, temperature => 22.5, types => chr(1) x 64, measure => "\0\0",
         fault => undef, faults => [], errors => [], connections => 0, requests => 0,
         digital_in => 1, digital_out => [0, 0], traffic => [],
@@ -35,7 +47,8 @@ sub new {
 
 sub discovery {
     my ($self) = @_;
-    return 'D' . pack('a6vva16vvvva4vCa22', "\x02\0\0\0\0\x32", 0x132,
+    my $mac = $self->{mac} // "\x02\0\0\0\0\x32";
+    return 'D' . pack('a6vva16vvvva4vCa22', $mac, 0x132,
         0x100, 'TC32-TEST       ', $self->{port}, $self->{port} + 1, 0, 0,
         inet_aton($self->{address}), 0x100, 0, "\0" x 22);
 }
@@ -92,10 +105,14 @@ sub close_client {
 }
 
 sub read_udp {
-    my ($self) = @_;
-    my $peer = recv($self->{udp}, my $data, 512, 0);
+    my ($self, $socket, $source) = @_;
+    my $peer = recv($socket, my $data, 512, 0);
     return if !defined($peer) && ($! == EAGAIN || $! == EWOULDBLOCK || $! == EINTR);
     defined $peer or die "UDP receive: $!\n";
+    if ($data eq 'D') {
+        push @{$self->{discovery_requests}}, {time => clock_gettime(CLOCK_MONOTONIC),
+            source => $source, online => $self->{online} ? 1 : 0};
+    }
     return unless $self->{online};
     my $reply;
     if ($data eq 'D') { $reply = $self->discovery(); }
@@ -209,7 +226,10 @@ sub poll {
     my ($readable, $writable) = IO::Select->select($self->{readers}, $writers, undef, $timeout);
     for my $socket (@{$readable // []}) {
         my $id = fileno($socket);
-        if ($id == fileno($self->{udp})) { $self->read_udp(); }
+        if ($id == fileno($self->{udp})) { $self->read_udp($self->{udp}, 'unicast'); }
+        elsif ($self->{broadcast} && $id == fileno($self->{broadcast})) {
+            $self->read_udp($self->{broadcast}, 'broadcast');
+        }
         elsif ($id == fileno($self->{tcp})) { $self->accept_client(); }
         else { $self->read_client($id); }
     }
@@ -223,7 +243,7 @@ sub poll {
 sub close {
     my ($self) = @_;
     for my $id (keys %{$self->{clients}}) { $self->close_client($id); }
-    for my $name (qw(udp tcp)) {
+    for my $name (qw(udp tcp broadcast)) {
         my $socket = delete $self->{$name};
         next unless $socket;
         $self->{readers}->remove($socket);
@@ -242,6 +262,6 @@ TC32 - External UDP/TCP TC32 fixture for the reconnect integration test
 
 =head1 DESCRIPTION
 
-Implements the discovery, digital input/output, temperature and configuration frames used by the real ULDAQ library. The fixture models a TC32 without EXP-32 and records unsupported requests as errors. A nonblocking event loop serves the sockets while the test waits for IOC output. EOF, incomplete response headers and receive timeout are injected at the network boundary. The timeout socket remains open for ten seconds after fault injection. The drop fault discards one request without closing the socket; subsequent requests receive normal responses. The bad-size fault returns a complete checksummed response with one unexpected payload byte. Request timestamps, connection numbers, payloads and complete response frames are retained as evidence.
+Implements the discovery, digital input/output, temperature and configuration frames used by the real ULDAQ library. The fixture models a TC32 without EXP-32 and records unsupported requests as errors. A nonblocking event loop serves the sockets while the test waits for IOC output. EOF, incomplete response headers and receive timeout are injected at the network boundary. The timeout socket remains open for ten seconds after fault injection. The drop fault discards one request without closing the socket; subsequent requests receive normal responses. The bad-size fault returns a complete checksummed response with one unexpected payload byte. Request timestamps, connection numbers, payloads and complete response frames are retained as evidence. The optional third constructor argument is a hash reference. Its C<mac> key sets the six-byte MAC address in the discovery reply. Its C<broadcast> key adds a wildcard UDP listener on the discovery port that records every broadcast discovery request with its monotonic time and replies, while the fixture is online, from the address-bound socket so the reply source is the device address. Broadcast replies are off by default, so cases that select a device by IP address keep their direct descriptor path. Every discovery request, broadcast or addressed, is retained in C<discovery_requests> with its source and online state.
 
 =cut

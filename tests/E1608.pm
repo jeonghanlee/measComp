@@ -9,7 +9,8 @@ use Socket qw(inet_aton);
 # device-specific payloads differ; the inherited transport stays external.
 sub discovery {
     my ($self) = @_;
-    return 'D' . pack('a6vva16vvvva4vCa22', "\x02\0\0\0\0\x08", 0x12f,
+    my $mac = $self->{mac} // "\x02\0\0\0\0\x08";
+    return 'D' . pack('a6vva16vvvva4vCa22', $mac, 0x12f,
         0x100, 'E-1608-TEST', $self->{port}, $self->{port} + 1, 0, 0,
         inet_aton($self->{address}), 0x100, 0, "\0" x 22);
 }

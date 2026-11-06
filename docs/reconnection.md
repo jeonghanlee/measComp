@@ -90,6 +90,35 @@ this behavior. After an offline start, apply the input Range and Type settings
 through their records once enums are available; failed PINI writes are not
 replayed by bounds recovery.
 
+## MAC device rediscovery
+
+A device selected by MAC address is looked up in the inventory built by the
+startup broadcast discovery. When the MAC is not in the inventory, for example
+because the device was powered off at startup, the connection attempt refreshes
+the inventory with one new broadcast and searches again. The poller's connect
+retry, at most once every five seconds per port, drives the attempts. The
+refresh itself runs at most once every four seconds for the whole IOC, so
+several ports waiting for absent devices share one broadcast. The interval is
+shorter than the retry because a retry starts before it waits for the vendor
+call lock; an equal interval would skip every second refresh under contention.
+The auto-connect and port-enable settings apply as for any reconnection; while
+either is off no discovery takes place.
+
+A refresh queries Ethernet devices only and appends the devices whose MAC is
+not yet in the inventory. Existing entries and the vendor device objects of
+connected ports are never touched, so their handles stay valid. A broadcast
+query waits 250 ms for each non-loopback IPv4 interface, and the vendor calls
+of the other ports wait for the same time. Devices selected by IP address or a
+resolvable host name use their own lookup and do not trigger a refresh; a name
+that cannot be resolved is treated like a MAC address and triggers the same
+bounded refresh. USB serial numbers never trigger one. The refresh belongs to
+the shared lookup, but a driver that calls it only once at construction, such
+as `USBCTR`, does not retry: a MAC that is absent at that call is found only
+if the single refresh allowed at that moment sees it. A known device that
+later changes its IP address is not tracked; reconnection uses the last
+discovery information. The Windows build uses the same logic and is not
+verified.
+
 ## Linux vendor dependency
 
 Linux builds require ULDAQ 1.2.2 with the TCP receive patch maintained by
@@ -137,6 +166,11 @@ E-1608 cases pass 16-bit raw values 0, 32768 and 65535 through real ULDAQ,
 driver callbacks and periodic/I/O Intr analog records, then check coefficients
 and engineering-unit values after startup, changed limits and reconnect.
 They also check two-sample averaging, SLOPE preservation and missing samples.
+MAC cases select a TC32 fixture by MAC address through broadcast discovery:
+offline startup followed by availability, online startup with EOF,
+auto-connect and port-disable controls, and two ports where a second device
+appears while the first keeps its connection and inventory entry, or while the
+first device is absent and its inventory entry must survive the refresh.
 Real hardware power cycling, physical ADC calibration, analog output
 voltage, scan acquisition, EXP-32, USB, Windows and other models require
 separate verification.

@@ -26,9 +26,18 @@ my $RECOVERY_TIMEOUT = 12;
 my $EXIT_TIMEOUT = 5;
 my $DIGITAL_POLL_MS = 10000;
 my $POLICY_WINDOW = 12;
+my $ABSENT_WINDOW = 11;
+my $RECONNECT_DELAY = 5;
+my $REFRESH_INTERVAL = 4;
+my $INTERVAL_TOLERANCE = 0.1;
+my $REDISCOVERY_LIMIT = 8;
+my $POLL_GAP_LIMIT = 3;
+my $MAC_A = "\x02\0\0\0\0\x32";
+my $MAC_B = "\x02\0\0\0\0\x33";
 my %CASES = map { $_ => 1 } qw(reconnect digital-word digital-control digital-policy digital-bits
     enum-tc32-online enum-tc32-offline enum-e1608-online enum-e1608-offline enum-e1608-init
-    bounds-tc32-online bounds-tc32-offline bounds-e1608-online bounds-e1608-offline);
+    bounds-tc32-online bounds-tc32-offline bounds-e1608-online bounds-e1608-offline
+    mac-tc32-online mac-tc32-offline mac-two-ports mac-known-absent);
 my @ANALOG_FIELDS = qw(bounds_status low high raw value slope offset egul eguf udf severity pact linear timestamp);
 my $ANALOG_TOLERANCE = 1e-10;
 
@@ -40,7 +49,9 @@ sub launch_ioc {
     my ($run, $executable, $dbd, $template) = @_;
     my $binary_template = File::Spec->catfile(dirname($template), 'measCompBinaryIn.template');
     my $startup = ($run->{family} // '') eq 'bounds' ? "bounds-$run->{startup}" : $run->{startup};
-    my @extra = $run->{model} ? ($run->{model}, $startup) : ();
+    my @extra = $run->{model} ? ($run->{model}, $startup)
+        : defined $run->{second_id} ? ($run->{second_id}) : ();
+    my $device_id = $run->{device_id} // $run->{device}{address};
     pipe(my $input_read, my $input_write) or die "IOC input pipe: $!\n";
     pipe(my $output_read, my $output_write) or die "IOC output pipe: $!\n";
     my $pid = fork();
@@ -52,7 +63,7 @@ sub launch_ioc {
         $SIG{INT} = $SIG{TERM} = $SIG{PIPE} = 'DEFAULT';
         {
             no warnings 'exec';
-            exec { $executable } $executable, $dbd, $template, $run->{device}{address}, $binary_template, @extra;
+            exec { $executable } $executable, $dbd, $template, $device_id, $binary_template, @extra;
         }
         POSIX::_exit(127);
     }
@@ -68,7 +79,10 @@ sub launch_ioc {
 
 sub pump {
     my ($run, $seconds) = @_;
-    $run->{device}->poll($seconds);
+    # Two fixtures share the wait so that neither device waits a whole slice for the other.
+    my $slice = $run->{device2} ? $seconds / 2 : $seconds;
+    $run->{device}->poll($slice);
+    $run->{device2}->poll($slice) if $run->{device2};
     while (!$run->{eof} && $run->{selector}->can_read(0)) {
         my $count = sysread($run->{output}, my $data, 65536);
         next if !defined($count) && $! == EINTR;
@@ -538,6 +552,264 @@ sub exercise_bounds {
     return;
 }
 
+sub mac_text {
+    my ($mac) = @_;
+    return join(':', map { sprintf('%02X', ord($_)) } split(//, $mac));
+}
+
+sub setup_mac {
+    my ($run) = @_;
+    $run->{device} = TC32->new(undef, undef, {broadcast => 1, mac => $MAC_A});
+    $run->{device_id} = mac_text($MAC_A);
+    return unless $run->{case} eq 'mac-two-ports' || $run->{case} eq 'mac-known-absent';
+    $run->{device}{online} = 1;
+    $run->{device2} = TC32->new('192.0.2.3', undef, {broadcast => 1, mac => $MAC_B});
+    $run->{device2}{temperature} = 37.25;
+    $run->{second_id} = mac_text($MAC_B);
+    return;
+}
+
+sub broadcast_times {
+    my ($device) = @_;
+    return map { $_->{time} } grep { $_->{source} eq 'broadcast' } @{$device->{discovery_requests}};
+}
+
+sub spaced {
+    my (@times) = @_;
+    for my $index (1 .. $#times) {
+        return 0 if $times[$index] - $times[$index - 1] < $REFRESH_INTERVAL - $INTERVAL_TOLERANCE;
+    }
+    return 1;
+}
+
+# Longest stretch without a request from the device between two monotonic times, counting the
+# edges of the interval, so a port that stops polling is not hidden by a few early requests.
+sub max_gap {
+    my ($device, $from, $to) = @_;
+    my @times = grep { $_ >= $from && $_ <= $to } map { $_->{time} } @{$device->{traffic}};
+    my ($previous, $largest) = ($from, 0);
+    for my $time (@times, $to) {
+        $largest = $time - $previous if $time - $previous > $largest;
+        $previous = $time;
+    }
+    return $largest;
+}
+
+sub inventory {
+    my ($run) = @_;
+    print {$run->{input}} "SHOW\n" or die "IOC input write: $!\n";
+    my @lines;
+    my $deadline = now() + $READ_TIMEOUT;
+    while (now() < $deadline) {
+        while (@{$run->{lines}}) {
+            my $line = shift @{$run->{lines}};
+            if ($line eq 'SHOWEND') {
+                my ($count) = map { /\AmeasCompShowDevices, numDevices=(\d+)\z/ ? $1 : () } @lines;
+                my @identifiers = map { /\AUniqueID: (\S+)\z/ ? $1 : () } map { s/\A\s+//r } @lines;
+                die "malformed inventory listing\n" unless defined $count;
+                return {count => 0 + $count, identifiers => \@identifiers};
+            }
+            push @lines, $line;
+        }
+        die "IOC output closed before SHOWEND\n" if $run->{eof};
+        pump($run, 0.02);
+    }
+    die "deadline exceeded waiting for SHOWEND\n";
+}
+
+sub state_b {
+    my ($run) = @_;
+    my @values = split /\s+/, command($run, 'STATEB', 'STATEB');
+    shift @values;
+    die "malformed second port state\n" unless @values == 5;
+    for my $value (@values) { die "non-numeric second port state: $value\n" unless looks_like_number($value); }
+    my %state;
+    @state{qw(connected pact udf severity value)} = map { 0 + $_ } @values;
+    return \%state;
+}
+
+sub wait_b {
+    my ($run, $value) = @_;
+    my $deadline = now() + $RECOVERY_TIMEOUT;
+    my $observed;
+    while (now() < $deadline) {
+        $observed = state_b($run);
+        return $observed if $observed->{connected} == 1 && $observed->{severity} == 0
+            && $observed->{udf} == 0 && abs($observed->{value} - $value) < 0.001;
+        pause($run, 0.1);
+    }
+    die 'deadline exceeded waiting for second port; last state=' . $JSON->encode($observed) . "\n";
+}
+
+sub exercise_mac {
+    my ($run) = @_;
+    my $device = $run->{device};
+    read_prefix($run, 'READY');
+    if ($run->{case} eq 'mac-tc32-offline') {
+        my $initial = state($run);
+        check($run, 'mac startup is disconnected', $initial->{connected} == 0
+            && $initial->{severity} == 3 && !$device->{connections}, $initial);
+        pause($run, $ABSENT_WINDOW);
+        my @times = broadcast_times($device);
+        my $absent = state($run);
+        check($run, 'mac port stays disconnected while absent', $absent->{connected} == 0
+            && $absent->{severity} == 3 && !$device->{connections}, $absent);
+        $device->{online} = 1;
+        my $enabled = now();
+        my $state = healthy($run, 22.5);
+        my $elapsed = now() - $enabled;
+        check($run, 'mac device connects after becoming available', $elapsed < $RECOVERY_TIMEOUT
+            && $device->{connections} == 1, {seconds => $elapsed, state => $state});
+        check($run, 'mac rediscovery requests while absent', @times >= 2 && @times <= 3 && spaced(@times), \@times);
+    } else {
+        my $state = healthy($run, 22.5);
+        my @times = broadcast_times($device);
+        check($run, 'mac online startup uses one discovery request', @times == 1, \@times);
+        pause($run, $RECONNECT_DELAY + 1);
+        @times = broadcast_times($device);
+        check($run, 'mac connected port sends no further discovery', @times == 1, \@times);
+        $device->{fault} = [0x12, 'eof'];
+        wait_for($run, sub { my ($s) = @_; return $s->{connected} == 0 && $s->{severity} == 3; });
+        check($run, 'mac EOF reached transport', !defined($device->{fault})
+            && $device->{faults}[-1][1] eq 'eof', $device->{faults}[-1]);
+        $device->{online} = 1;
+        healthy($run, 22.5);
+        @times = broadcast_times($device);
+        check($run, 'mac EOF recovery reconnects without discovery', @times == 1, \@times);
+
+        check($run, 'mac disable autoconnect', command($run, 'AUTO 0') eq 'RESULT 0', 'AUTO 0');
+        $device->{fault} = [0x00, 'eof'];
+        wait_for($run, sub { my ($s) = @_; return $s->{connected} == 0 && $s->{severity} == 3; });
+        my $connections = $device->{connections};
+        my $unchanged = 1;
+        my $deadline = now() + $POLICY_WINDOW;
+        while (now() < $deadline) {
+            $unchanged = 0 if state($run)->{connected};
+            pause($run, 0.1);
+        }
+        @times = broadcast_times($device);
+        check($run, 'mac autoconnect off prevents discovery and connection', $unchanged
+            && $device->{connections} == $connections && @times == 1,
+            {connections => $device->{connections}, discovery => \@times});
+        check($run, 'mac enable autoconnect', command($run, 'AUTO 1') eq 'RESULT 0', 'AUTO 1');
+        $device->{online} = 1;
+        healthy($run, 22.5);
+        @times = broadcast_times($device);
+        check($run, 'mac autoconnect recovery reconnects without discovery', @times == 1, \@times);
+
+        $device->{fault} = [0x00, 'eof'];
+        wait_for($run, sub { my ($s) = @_; return $s->{connected} == 0 && $s->{severity} == 3; });
+        check($run, 'mac disable port', command($run, 'ENABLE 0') eq 'RESULT 0', 'ENABLE 0');
+        $connections = $device->{connections};
+        $unchanged = 1;
+        $deadline = now() + $POLICY_WINDOW;
+        while (now() < $deadline) {
+            $unchanged = 0 if state($run)->{connected};
+            pause($run, 0.1);
+        }
+        @times = broadcast_times($device);
+        check($run, 'mac disabled port prevents discovery and connection', $unchanged
+            && $device->{connections} == $connections && @times == 1,
+            {connections => $device->{connections}, discovery => \@times});
+        check($run, 'mac enable port', command($run, 'ENABLE 1') eq 'RESULT 0', 'ENABLE 1');
+        $device->{online} = 1;
+        healthy($run, 22.5);
+        @times = broadcast_times($device);
+        check($run, 'mac enabled port reconnects without discovery', @times == 1, \@times);
+    }
+    check($run, 'mac fixture commands supported', !@{$device->{errors}}, $device->{errors});
+    print {$run->{input}} "QUIT\n" or die "IOC input write: $!\n";
+    wait_exit($run, $EXIT_TIMEOUT) or die "IOC exit deadline exceeded\n";
+    check($run, 'mac IOC exits normally', $run->{ioc_exit} == 0, $run->{ioc_exit});
+    return;
+}
+
+sub exercise_mac_two {
+    my ($run) = @_;
+    my $first = $run->{device};
+    my $second = $run->{device2};
+    read_prefix($run, 'READY');
+    healthy($run, 22.5);
+    my $polling_from = now();
+    my $absent = state_b($run);
+    check($run, 'mac second port is absent and invalid', $absent->{connected} == 0
+        && $absent->{severity} == 3 && !$second->{connections}, $absent);
+    pause($run, $ABSENT_WINDOW);
+    my @first_times = broadcast_times($first);
+    my @second_times = broadcast_times($second);
+    my $connections = $first->{connections};
+    $second->{online} = 1;
+    my $enabled = now();
+    my $second_state = wait_b($run, 37.25);
+    my $elapsed = now() - $enabled;
+    check($run, 'mac second device connects with its own value', $elapsed < $REDISCOVERY_LIMIT
+        && $second->{connections} == 1, {seconds => $elapsed, state => $second_state});
+    check($run, 'mac absent port shares bounded discovery', @first_times >= 2 && @first_times <= 3
+        && spaced(@first_times) && @second_times == @first_times,
+        {first => \@first_times, second => \@second_times});
+    my $requests = $first->{requests};
+    pause($run, 2);
+    my $gap = max_gap($first, $polling_from, now());
+    my $first_state = state($run);
+    check($run, 'mac first port keeps its connection', $first->{connections} == $connections
+        && $connections == 1 && $first_state->{connected} == 1 && $first_state->{severity} == 0
+        && abs($first_state->{value} - 22.5) < 0.001, {connections => $first->{connections}, state => $first_state});
+    check($run, 'mac first port continues polling', $first->{requests} > $requests && $gap < $POLL_GAP_LIMIT,
+        {before => $requests, after => $first->{requests}, longest_gap => $gap});
+    my $listing = inventory($run);
+    my %distinct = map { $_ => 1 } @{$listing->{identifiers}};
+    check($run, 'mac inventory has two distinct devices', $listing->{count} == 2
+        && @{$listing->{identifiers}} == 2 && keys(%distinct) == 2
+        && $distinct{mac_text($MAC_A)} && $distinct{mac_text($MAC_B)}, $listing);
+    check($run, 'mac fixture commands supported', !@{$first->{errors}} && !@{$second->{errors}},
+        {first => $first->{errors}, second => $second->{errors}});
+    print {$run->{input}} "QUIT\n" or die "IOC input write: $!\n";
+    wait_exit($run, $EXIT_TIMEOUT) or die "IOC exit deadline exceeded\n";
+    check($run, 'mac IOC stops on request', $run->{ioc_exit} == 0, $run->{ioc_exit});
+    return;
+}
+
+sub exercise_mac_known {
+    my ($run) = @_;
+    my $first = $run->{device};
+    my $second = $run->{device2};
+    read_prefix($run, 'READY');
+    healthy($run, 22.5);
+    $first->{fault} = [0x12, 'eof'];
+    wait_for($run, sub { my ($s) = @_; return $s->{connected} == 0 && $s->{severity} == 3; });
+    check($run, 'mac known device is absent', !defined($first->{fault}) && !$first->{online},
+        $first->{faults}[-1]);
+    my $connections = $first->{connections};
+    $second->{online} = 1;
+    my $enabled = now();
+    my $second_state = wait_b($run, 37.25);
+    my $elapsed = now() - $enabled;
+    check($run, 'mac second device connects while the first is absent', $elapsed < $RECOVERY_TIMEOUT
+        && $second->{connections} == 1, {seconds => $elapsed, state => $second_state});
+    my $listing = inventory($run);
+    my %distinct = map { $_ => 1 } @{$listing->{identifiers}};
+    check($run, 'mac inventory keeps the absent known device', $listing->{count} == 2
+        && @{$listing->{identifiers}} == 2 && keys(%distinct) == 2
+        && $distinct{mac_text($MAC_A)} && $distinct{mac_text($MAC_B)}, $listing);
+    my @times = broadcast_times($first);
+    $first->{online} = 1;
+    my $first_state = healthy($run, 22.5);
+    my @after = broadcast_times($first);
+    check($run, 'mac known device reconnects from its inventory entry', $first->{connections} > $connections
+        && @after == @times, {connections => $first->{connections}, state => $first_state,
+        discovery_before => \@times, discovery_after => \@after});
+    my $second_after = state_b($run);
+    check($run, 'mac second port keeps its connection', $second->{connections} == 1
+        && $second_after->{connected} == 1 && $second_after->{severity} == 0
+        && abs($second_after->{value} - 37.25) < 0.001, $second_after);
+    check($run, 'mac fixture commands supported', !@{$first->{errors}} && !@{$second->{errors}},
+        {first => $first->{errors}, second => $second->{errors}});
+    print {$run->{input}} "QUIT\n" or die "IOC input write: $!\n";
+    wait_exit($run, $EXIT_TIMEOUT) or die "IOC exit deadline exceeded\n";
+    check($run, 'mac IOC stops on request', $run->{ioc_exit} == 0, $run->{ioc_exit});
+    return;
+}
+
 sub digital_window {
     my ($run) = @_;
     my $device = $run->{device};
@@ -809,14 +1081,21 @@ sub finalize {
         }
     }
     $run->{device}->close() if $run->{device};
+    $run->{device2}->close() if $run->{device2};
     for my $name (qw(input output)) {
         close($run->{$name}) or die "IOC $name: close: $!\n" if $run->{$name};
     }
     my $device = $run->{device};
+    my $second = $run->{device2};
     my $evidence = {checks => $run->{checks}, faults => $device ? $device->{faults} : [],
         fixture_errors => $device ? $device->{errors} : [], ioc_exit => $run->{ioc_exit},
         case => $run->{case}, diagnostics => $run->{diagnostics},
-        traffic => $device ? $device->{traffic} : []};
+        traffic => $device ? $device->{traffic} : [],
+        discovery => $device ? $device->{discovery_requests} : []};
+    if ($second) {
+        $evidence->{second_device} = {faults => $second->{faults}, fixture_errors => $second->{errors},
+            traffic => $second->{traffic}, discovery => $second->{discovery_requests}};
+    }
     my $path = "$run->{log_path}.json";
     open(my $out, '>:raw', $path) or die "$path: $!\n";
     print {$out} $JSON->pretty->indent_length(2)->encode($evidence) or die "$path: write: $!\n";
@@ -843,10 +1122,14 @@ sub main {
     STDOUT->autoflush(1);
     my $success = eval {
         ($run->{family}, $run->{model}, $run->{startup}) = $case =~ /\A(enum|bounds)-(tc32|e1608)-(online|offline|init)\z/;
-        $run->{device} = ($run->{model} // '') eq 'e1608' ? E1608->new() : TC32->new();
+        if ($case =~ /\Amac-/) { setup_mac($run); }
+        else { $run->{device} = ($run->{model} // '') eq 'e1608' ? E1608->new() : TC32->new(); }
         $run->{device}{online} = 1 if $case =~ /-online\z/;
         launch_ioc($run, $executable, $dbd, $template);
         if (($run->{family} // '') eq 'bounds') { exercise_bounds($run); }
+        elsif ($case eq 'mac-two-ports') { exercise_mac_two($run); }
+        elsif ($case eq 'mac-known-absent') { exercise_mac_known($run); }
+        elsif ($case =~ /\Amac-/) { exercise_mac($run); }
         elsif ($run->{model}) { exercise_enums($run); }
         elsif ($case eq 'reconnect') { exercise($run); }
         else { exercise_digital($run); }
@@ -893,11 +1176,13 @@ Print usage and exit successfully.
 
 =item --case NAME
 
-Select reconnect (default), digital-word, digital-control, digital-policy, digital-bits, enum-tc32-online, enum-tc32-offline, enum-e1608-online, enum-e1608-offline, enum-e1608-init, bounds-tc32-online, bounds-tc32-offline, bounds-e1608-online or bounds-e1608-offline. Each invocation creates a fresh IOC and external fixture.
+Select reconnect (default), digital-word, digital-control, digital-policy, digital-bits, enum-tc32-online, enum-tc32-offline, enum-e1608-online, enum-e1608-offline, enum-e1608-init, bounds-tc32-online, bounds-tc32-offline, bounds-e1608-online, bounds-e1608-offline, mac-tc32-online, mac-tc32-offline, mac-two-ports or mac-known-absent. Each invocation creates a fresh IOC and its external fixtures.
 
 Enum cases compare all record enum states with public driver reads and model-specific expected values, write every supported selection through the record, and check RVAL, SDEF, asynchronous completion, alarm severity and public driver readback. They repeat two transport failures and reconnects. The init case holds the real IOC after record initialization, enables device responses, proves connection while interruptAccept is zero, and resumes IOC initialization.
 
 Bounds cases check TC32 24-bit conversion metadata without valid voltage samples, or E-1608 16-bit raw samples through periodic and I/O Intr records. They check engineering-limit changes; E-1608 also checks two-sample averaging, manual SLOPE coefficients, transport recovery and missing-sample alarms. The external fixture supplies raw values; real ULDAQ, driver and device support produce the record values.
+
+MAC cases select each TC32 fixture by MAC address, so the real driver finds it through broadcast discovery. mac-tc32-offline observes the absent device for eleven seconds while the fixture records every broadcast discovery request, then makes it available and requires a valid reading within twelve seconds. The recorded requests must number two or three and be at least 3.9 seconds apart, the four-second minimum refresh interval less a tolerance. mac-tc32-online requires the startup discovery to be the only discovery request through an idle interval, an EOF reconnect, and periods with auto-connect disabled and with the port disabled while the device is absent. mac-two-ports runs a second port, with its own MAC and a different temperature, whose device appears while the first port stays connected and must connect within eight seconds, which a skipped refresh would exceed; the first port must keep its single connection and value, must never go three seconds without a request from the moment it is healthy, and the inventory must list exactly two distinct MAC addresses. mac-known-absent takes the first device offline before the second device appears, then requires the inventory to keep both MAC addresses and the first port to reconnect from its inventory entry without another discovery request. The two-port cases end the IOC directly and check only that it stops on request, because with two ports the driver's exit handlers can destroy a port object while its poller thread still runs, which aborts some exits of the original driver as well.
 
 =back
 
