@@ -122,6 +122,21 @@ later changes its IP address is not tracked; reconnection uses the last
 discovery information. The Windows build uses the same logic and is not
 verified.
 
+## Discovery endpoint identity
+
+A device selected by IP address or host name is looked up in the inventory by
+its resolved IP address and its discovery port together. Two devices at one IP
+address on different discovery ports therefore keep separate entries and
+separate connections; before this identity, the second one reused the first
+one's entry and reported its values. Entries found by broadcast discovery
+carry the default discovery port, 54211, so a device found at startup matches a
+later selector that names its address with or without that port. A host name
+is resolved before the lookup, so it is equivalent to the address it resolves
+to. When a direct query returns a device whose MAC is already in the
+inventory, that entry is reused rather than duplicated. A selector that names
+the wrong discovery port for a device does not find it; the query times out
+and the port retries as for an absent device.
+
 ## Linux vendor dependency
 
 Linux builds require ULDAQ 1.2.2 with the TCP receive patch maintained by
@@ -174,6 +189,9 @@ offline startup followed by availability, online startup with EOF,
 auto-connect and port-disable controls, and two ports where a second device
 appears while the first keeps its connection and inventory entry, or while the
 first device is absent and its inventory entry must survive the refresh.
+Endpoint cases run two devices at one IP address on different discovery ports,
+by address and by MAC, and check address, explicit default port, alternate
+port and host name selection against single devices.
 Real hardware power cycling, physical ADC calibration, analog output
 voltage, scan acquisition, EXP-32, USB, Windows and other models require
 separate verification.

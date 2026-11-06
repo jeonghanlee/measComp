@@ -29,6 +29,11 @@
 #define INVENTORY_REFRESH_INTERVAL 4.0
 
 static DaqDeviceDescriptor measCompInventory[MAX_DEVICES];
+// Discovery port of each inventory entry.  Entries from a broadcast discovery were reached on the
+// default discovery port; entries from a direct query record the port that was requested.  Together
+// with the IP address in the descriptor's reserved field it identifies a direct-discovery endpoint,
+// so two devices at one IP address on different discovery ports stay distinct.
+static int measCompInventoryPort[MAX_DEVICES];
 static int measCompNumDevices = 0;
 bool measCompInventoryInitialized = false;
 static epicsMutex inventoryMutex;
@@ -86,6 +91,7 @@ int measCompDiscoverDevices()
     printf("Error calling cbGetDaqDeviceInventory=%d\n", status);
     return status;
   }
+  for (int i=0; i<numDevices; i++) measCompInventoryPort[i] = DEFAULT_DISCOVERY_PORT;
   measCompNumDevices = numDevices;
   measCompInventoryInitialized = true;
   return 0;
@@ -179,6 +185,7 @@ static int measCompRefreshInventory()
     #ifndef WIN32
       measCompReadIpAddress(found[i]);
     #endif
+    measCompInventoryPort[measCompNumDevices] = DEFAULT_DISCOVERY_PORT;
     measCompInventory[measCompNumDevices++] = found[i];
     added++;
   }
@@ -235,17 +242,21 @@ int measCompCreateDevice(std::string uniqueId, DaqDeviceDescriptor& deviceDescri
       portNum = atoi(port.c_str());
       host = host.substr(0, colon);
     }
-    // See if this host is already known, i.e. it was found on the local subnet
+    // See if this endpoint is already known: the same IP address on the same discovery port.  The
+    // port is part of the identity because distinct devices can share an IP address and differ only
+    // in their discovery port.
     for (int i=0; i<measCompNumDevices; i++) {
       #ifdef WIN32
         /*  This logic does not work on Windows because there is no way to retrieve the IP address and copy it to .Reserved
          *  This is OK, it is just slightly less efficient because it will always call cbGetNetDeviceDescriptor unless UniqueID is a MAC address.
-        if (host.compare(measCompInventory[i].Reserved) == 0) {
+        if (host.compare(measCompInventory[i].Reserved) == 0 && portNum == measCompInventoryPort[i]) {
           devIndex = i;
+          break;
         } */
       #else
-        if (host.compare(measCompInventory[i].reserved) == 0) {
+        if (host.compare(measCompInventory[i].reserved) == 0 && portNum == measCompInventoryPort[i]) {
           devIndex = i;
+          break;
         }
       #endif
     }
@@ -270,8 +281,18 @@ int measCompCreateDevice(std::string uniqueId, DaqDeviceDescriptor& deviceDescri
       #ifndef WIN32
         epicsSnprintf(descriptor.reserved, sizeof(descriptor.reserved), "%s", host.c_str());
       #endif
-      devIndex = measCompNumDevices++;
-      measCompInventory[devIndex] = descriptor;
+      // A device reached through another selector for the same unique ID keeps its single entry
+      // and vendor object; otherwise the endpoint is appended with the port it was reached on.
+      #ifdef WIN32
+        devIndex = measCompFindDevice(descriptor.UniqueID);
+      #else
+        devIndex = measCompFindDevice(descriptor.uniqueId);
+      #endif
+      if (devIndex == -1) {
+        devIndex = measCompNumDevices++;
+        measCompInventoryPort[devIndex] = portNum;
+        measCompInventory[devIndex] = descriptor;
+      }
     }
   }
   else {

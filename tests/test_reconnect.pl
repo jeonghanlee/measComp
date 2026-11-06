@@ -37,7 +37,12 @@ my $MAC_B = "\x02\0\0\0\xab\x33";
 my %CASES = map { $_ => 1 } qw(reconnect digital-word digital-control digital-policy digital-bits
     enum-tc32-online enum-tc32-offline enum-e1608-online enum-e1608-offline enum-e1608-init
     bounds-tc32-online bounds-tc32-offline bounds-e1608-online bounds-e1608-offline
-    mac-tc32-online mac-tc32-offline mac-two-ports mac-known-absent);
+    mac-tc32-online mac-tc32-offline mac-two-ports mac-known-absent
+    endpoint-same-ip endpoint-mixed endpoint-distinct-ip endpoint-default-port endpoint-alt-port
+    endpoint-hostname endpoint-hostname-port endpoint-wrong-port);
+my $ALT_DISCOVERY_PORT = 54221;
+my $UNUSED_DISCOVERY_PORT = 54231;
+my $FIXTURE_HOSTNAME = 'fixture-a';
 my @ANALOG_FIELDS = qw(bounds_status low high raw value slope offset egul eguf udf severity pact linear timestamp);
 my $ANALOG_TOLERANCE = 1e-10;
 
@@ -608,8 +613,9 @@ sub inventory {
             if ($line eq 'SHOWEND') {
                 my ($count) = map { /\AmeasCompShowDevices, numDevices=(\d+)\z/ ? $1 : () } @lines;
                 my @identifiers = map { /\AUniqueID: (\S+)\z/ ? $1 : () } map { s/\A\s+//r } @lines;
+                my @reserved = map { /\AReserved: (\S*)\z/ ? $1 : () } map { s/\A\s+//r } @lines;
                 die "malformed inventory listing\n" unless defined $count;
-                return {count => 0 + $count, identifiers => \@identifiers};
+                return {count => 0 + $count, identifiers => \@identifiers, reserved => \@reserved};
             }
             push @lines, $line;
         }
@@ -630,8 +636,10 @@ sub state_b {
     return \%state;
 }
 
+# Waits for the second port to report the expected value. With $lenient the last observed state is
+# returned at the deadline, so a case can assert the value by name instead of dying.
 sub wait_b {
-    my ($run, $value) = @_;
+    my ($run, $value, $lenient) = @_;
     my $deadline = now() + $RECOVERY_TIMEOUT;
     my $observed;
     while (now() < $deadline) {
@@ -640,6 +648,7 @@ sub wait_b {
             && $observed->{udf} == 0 && abs($observed->{value} - $value) < 0.001;
         pause($run, 0.1);
     }
+    return $observed if $lenient;
     die 'deadline exceeded waiting for second port; last state=' . $JSON->encode($observed) . "\n";
 }
 
@@ -809,6 +818,102 @@ sub exercise_mac_known {
     print {$run->{input}} "QUIT\n" or die "IOC input write: $!\n";
     wait_exit($run, $EXIT_TIMEOUT) or die "IOC exit deadline exceeded\n";
     check($run, 'mac IOC stops on request', $run->{ioc_exit} == 0, $run->{ioc_exit});
+    return;
+}
+
+# Endpoint cases select devices by IP address, discovery port, hostname or MAC. Each case names
+# the first fixture's address and port, whether it answers broadcast discovery, the IOC's selector
+# for it, and optionally the second fixture and its selector.
+sub setup_endpoint {
+    my ($run) = @_;
+    my %layout = (
+        'endpoint-same-ip'      => ['192.0.2.2', undef, 0, '192.0.2.2', ['192.0.2.2', $ALT_DISCOVERY_PORT, "192.0.2.2:$ALT_DISCOVERY_PORT"]],
+        'endpoint-mixed'        => ['192.0.2.2', undef, 1, mac_text($MAC_A), ['192.0.2.2', $ALT_DISCOVERY_PORT, "192.0.2.2:$ALT_DISCOVERY_PORT"]],
+        'endpoint-distinct-ip'  => ['192.0.2.2', undef, 0, '192.0.2.2', ['192.0.2.3', undef, '192.0.2.3']],
+        'endpoint-default-port' => ['192.0.2.2', undef, 1, '192.0.2.2:54211', undef],
+        'endpoint-alt-port'     => ['192.0.2.2', $ALT_DISCOVERY_PORT, 0, "192.0.2.2:$ALT_DISCOVERY_PORT", undef],
+        'endpoint-hostname'     => ['192.0.2.2', undef, 0, $FIXTURE_HOSTNAME, undef],
+        'endpoint-hostname-port' => ['192.0.2.2', $ALT_DISCOVERY_PORT, 0, "$FIXTURE_HOSTNAME:$ALT_DISCOVERY_PORT", undef],
+        'endpoint-wrong-port'   => ['192.0.2.2', undef, 0, "192.0.2.2:$UNUSED_DISCOVERY_PORT", undef],
+    );
+    my ($address, $port, $broadcast, $selector, $second) = @{$layout{$run->{case}}};
+    $run->{device} = TC32->new($address, $port, {broadcast => $broadcast, mac => $MAC_A});
+    $run->{device}{online} = 1;
+    $run->{device_id} = $selector;
+    return unless $second;
+    my ($address2, $port2, $selector2) = @$second;
+    $run->{device2} = TC32->new($address2, $port2, {mac => $MAC_B});
+    $run->{device2}{online} = 1;
+    $run->{device2}{temperature} = 37.25;
+    $run->{second_id} = $selector2;
+    return;
+}
+
+sub exercise_endpoint {
+    my ($run) = @_;
+    my $first = $run->{device};
+    my $second = $run->{device2};
+    read_prefix($run, 'READY');
+    if ($run->{case} eq 'endpoint-wrong-port') {
+        # A selector with a discovery port nobody listens on must find nothing: the direct query
+        # times out, the port keeps retrying as for an absent device, and the inventory stays empty.
+        pause($run, $RECOVERY_TIMEOUT);
+        my $absent = state($run);
+        my $listing = inventory($run);
+        check($run, 'endpoint wrong port finds no device', $absent->{connected} == 0 && $absent->{severity} == 3
+            && !$first->{connections} && $listing->{count} == 0,
+            {state => $absent, connections => $first->{connections}, inventory => $listing});
+        check($run, 'endpoint fixture commands supported', !@{$first->{errors}}, $first->{errors});
+        print {$run->{input}} "QUIT\n" or die "IOC input write: $!\n";
+        wait_exit($run, $EXIT_TIMEOUT) or die "IOC exit deadline exceeded\n";
+        check($run, 'endpoint IOC exits normally', $run->{ioc_exit} == 0, $run->{ioc_exit});
+        return;
+    }
+    my $healthy_from = now();
+    my $first_state = healthy($run, 22.5);
+    check($run, 'endpoint first port reads its device', abs($first_state->{value} - 22.5) < 0.001
+        && $first_state->{severity} == 0, $first_state);
+    if ($second) {
+        my $second_state = wait_b($run, 37.25, 1);
+        check($run, 'endpoint second port reads its device', abs($second_state->{value} - 37.25) < 0.001
+            && $second_state->{severity} == 0 && $second->{connections} == 1,
+            {state => $second_state, connections => $second->{connections},
+             first_connections => $first->{connections}});
+        pause($run, 2);
+        my $gap = max_gap($first, $healthy_from, now());
+        my $again = state($run);
+        check($run, 'endpoint first port keeps its single connection', $first->{connections} == 1
+            && $again->{connected} == 1 && abs($again->{value} - 22.5) < 0.001 && $gap < $POLL_GAP_LIMIT,
+            {connections => $first->{connections}, state => $again, longest_gap => $gap});
+    } else {
+        pause($run, 2);
+        check($run, 'endpoint single port keeps its single connection', $first->{connections} == 1,
+            {connections => $first->{connections}});
+    }
+    my $listing = inventory($run);
+    my %distinct = map { $_ => 1 } @{$listing->{identifiers}};
+    my $expected = $second ? 2 : 1;
+    check($run, "endpoint inventory has $expected distinct device" . ($expected == 1 ? '' : 's'),
+        $listing->{count} == $expected && @{$listing->{identifiers}} == $expected && keys(%distinct) == $expected
+        && $distinct{mac_text($MAC_A)} && ($expected == 1 || $distinct{mac_text($MAC_B)}), $listing);
+    if ($run->{case} =~ /\Aendpoint-hostname/) {
+        check($run, 'endpoint hostname resolves to the device address', @{$listing->{reserved}} == 1
+            && $listing->{reserved}[0] eq $first->{address}, $listing);
+    }
+    if ($first->{broadcast}) {
+        # A device found by the startup broadcast must be matched in the inventory, so the only
+        # addressed discovery request it receives is the vendor library's MAC check at connection.
+        my @times = broadcast_times($first);
+        my @unicast = grep { $_->{source} eq 'unicast' } @{$first->{discovery_requests}};
+        check($run, 'endpoint broadcast-discovered device is not queried again', @times == 1 && @unicast == 1,
+            {broadcast => \@times, unicast => scalar @unicast});
+    }
+    check($run, 'endpoint fixture commands supported', !@{$first->{errors}} && (!$second || !@{$second->{errors}}),
+        {first => $first->{errors}, second => $second ? $second->{errors} : []});
+    print {$run->{input}} "QUIT\n" or die "IOC input write: $!\n";
+    wait_exit($run, $EXIT_TIMEOUT) or die "IOC exit deadline exceeded\n";
+    check($run, $second ? 'endpoint IOC stops on request' : 'endpoint IOC exits normally',
+        $run->{ioc_exit} == 0, $run->{ioc_exit});
     return;
 }
 
@@ -1125,12 +1230,14 @@ sub main {
     my $success = eval {
         ($run->{family}, $run->{model}, $run->{startup}) = $case =~ /\A(enum|bounds)-(tc32|e1608)-(online|offline|init)\z/;
         if ($case =~ /\Amac-/) { setup_mac($run); }
+        elsif ($case =~ /\Aendpoint-/) { setup_endpoint($run); }
         else { $run->{device} = ($run->{model} // '') eq 'e1608' ? E1608->new() : TC32->new(); }
         $run->{device}{online} = 1 if $case =~ /-online\z/;
         launch_ioc($run, $executable, $dbd, $template);
         if (($run->{family} // '') eq 'bounds') { exercise_bounds($run); }
         elsif ($case eq 'mac-two-ports') { exercise_mac_two($run); }
         elsif ($case eq 'mac-known-absent') { exercise_mac_known($run); }
+        elsif ($case =~ /\Aendpoint-/) { exercise_endpoint($run); }
         elsif ($case =~ /\Amac-/) { exercise_mac($run); }
         elsif ($run->{model}) { exercise_enums($run); }
         elsif ($case eq 'reconnect') { exercise($run); }
@@ -1178,13 +1285,15 @@ Print usage and exit successfully.
 
 =item --case NAME
 
-Select reconnect (default), digital-word, digital-control, digital-policy, digital-bits, enum-tc32-online, enum-tc32-offline, enum-e1608-online, enum-e1608-offline, enum-e1608-init, bounds-tc32-online, bounds-tc32-offline, bounds-e1608-online, bounds-e1608-offline, mac-tc32-online, mac-tc32-offline, mac-two-ports or mac-known-absent. Each invocation creates a fresh IOC and its external fixtures.
+Select reconnect (default), digital-word, digital-control, digital-policy, digital-bits, enum-tc32-online, enum-tc32-offline, enum-e1608-online, enum-e1608-offline, enum-e1608-init, bounds-tc32-online, bounds-tc32-offline, bounds-e1608-online, bounds-e1608-offline, mac-tc32-online, mac-tc32-offline, mac-two-ports, mac-known-absent, endpoint-same-ip, endpoint-mixed, endpoint-distinct-ip, endpoint-default-port, endpoint-alt-port, endpoint-hostname, endpoint-hostname-port or endpoint-wrong-port. Each invocation creates a fresh IOC and its external fixtures.
 
 Enum cases compare all record enum states with public driver reads and model-specific expected values, write every supported selection through the record, and check RVAL, SDEF, asynchronous completion, alarm severity and public driver readback. They repeat two transport failures and reconnects. The init case holds the real IOC after record initialization, enables device responses, proves connection while interruptAccept is zero, and resumes IOC initialization.
 
 Bounds cases check TC32 24-bit conversion metadata without valid voltage samples, or E-1608 16-bit raw samples through periodic and I/O Intr records. They check engineering-limit changes; E-1608 also checks two-sample averaging, manual SLOPE coefficients, transport recovery and missing-sample alarms. The external fixture supplies raw values; real ULDAQ, driver and device support produce the record values.
 
 MAC cases select each TC32 fixture by MAC address, so the real driver finds it through broadcast discovery. mac-tc32-offline observes the absent device for eleven seconds while the fixture records every broadcast discovery request, then makes it available and requires a valid reading within twelve seconds. The recorded requests must number two or three and be at least 3.9 seconds apart, the four-second minimum refresh interval less a tolerance. mac-tc32-online requires the startup discovery to be the only discovery request through an idle interval, an EOF reconnect, and periods with auto-connect disabled and with the port disabled while the device is absent. mac-two-ports runs a second port, selected by a lower-case MAC with hexadecimal letters and with a different temperature, whose device appears while the first port stays connected and must connect within eight seconds, which a skipped refresh would exceed; the first port must keep its single connection and value, must never go three seconds without a request from the moment it is healthy, and the inventory must list exactly two distinct MAC addresses. mac-known-absent takes the first device offline before the second device appears, then requires the inventory to keep both MAC addresses and the first port to reconnect from its inventory entry without another discovery request. The two-port cases end the IOC directly and check only that it stops on request, because with two ports the driver's exit handlers can destroy a port object while its poller thread still runs, which aborts some exits of the original driver as well.
+
+Endpoint cases select devices by IP address, discovery port, hostname or MAC and require every port to read its own device with a single connection per fixture. endpoint-same-ip runs two fixtures at one IP address on discovery ports 54211 and 54221; endpoint-mixed selects the first of them by MAC through broadcast discovery and the second by IP address and port 54221; endpoint-distinct-ip runs two fixtures at distinct addresses. endpoint-default-port selects a broadcast-discovered device with an explicit default port and requires one inventory entry; endpoint-alt-port runs one fixture on port 54221; endpoint-hostname selects one fixture by a name that the namespace resolves through a bind-mounted hosts file and requires the resolved address in the inventory; endpoint-hostname-port selects a fixture on port 54221 by that name and port. endpoint-wrong-port names a discovery port nobody listens on and requires the port to stay disconnected with an empty inventory. The two-port endpoint cases end the IOC directly like the two-port MAC cases.
 
 =back
 

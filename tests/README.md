@@ -289,6 +289,80 @@ known-absent cases must fail at the second port's connection deadline, because
 their second port is configured with a lower-case MAC. Build or setup errors do
 not count as detecting a defect.
 
+## Discovery endpoint cases
+
+These cases need the third address and, for the hostname case, a mount
+namespace in which the shipped `tests/endpoint-hosts` file replaces
+`/etc/hosts` so that `fixture-a` resolves to the first fixture's address. The
+bind mount is visible only inside the namespace; the host's own file is not
+changed. Enter the namespace with the mount flag, then set up the addresses
+as above and mount the hosts file:
+
+```bash
+unshare -Urnm bash
+ip link set lo up
+ip link add sim0 type dummy
+ip addr add 192.0.2.1/24 dev sim0
+ip link set sim0 up
+ip addr add 192.0.2.2/32 dev lo
+ip addr add 192.0.2.3/32 dev lo
+mount --bind "$PWD/tests/endpoint-hosts" /etc/hosts
+```
+
+Run the cases in that shell with the existing `BUILD`:
+
+```bash
+export TEMPLATE="$PWD/measCompApp/Db/measCompTemperatureIn.template"
+export IOC="$BUILD/reconnect-ioc"
+export DBD="$BUILD/reconnect.dbd"
+export RUNNER="$PWD/tests/test_reconnect.pl"
+timeout 120s perl "$RUNNER" --case endpoint-same-ip "$IOC" "$DBD" "$TEMPLATE" "$BUILD/ep-same.log"
+timeout 120s perl "$RUNNER" --case endpoint-mixed "$IOC" "$DBD" "$TEMPLATE" "$BUILD/ep-mixed.log"
+timeout 120s perl "$RUNNER" --case endpoint-distinct-ip "$IOC" "$DBD" "$TEMPLATE" "$BUILD/ep-distinct.log"
+timeout 120s perl "$RUNNER" --case endpoint-default-port "$IOC" "$DBD" "$TEMPLATE" "$BUILD/ep-default.log"
+timeout 120s perl "$RUNNER" --case endpoint-alt-port "$IOC" "$DBD" "$TEMPLATE" "$BUILD/ep-alt.log"
+timeout 120s perl "$RUNNER" --case endpoint-hostname "$IOC" "$DBD" "$TEMPLATE" "$BUILD/ep-host.log"
+timeout 120s perl "$RUNNER" --case endpoint-hostname-port "$IOC" "$DBD" "$TEMPLATE" "$BUILD/ep-hostport.log"
+timeout 120s perl "$RUNNER" --case endpoint-wrong-port "$IOC" "$DBD" "$TEMPLATE" "$BUILD/ep-wrong.log"
+exit
+```
+
+`endpoint-same-ip` runs two fixtures at one address, 22.5 C on discovery port
+54211 selected as `192.0.2.2` and 37.25 C on port 54221 selected as
+`192.0.2.2:54221`. Each port must read its own device, each fixture must see
+exactly one connection, the first port must never go three seconds without a
+request after it is healthy, and the inventory must list the two MAC
+addresses. `endpoint-mixed` selects the first fixture by its MAC through the
+startup broadcast and the second as `192.0.2.2:54221`, with the same
+requirements plus a single discovery request for the first device.
+`endpoint-distinct-ip` runs the same two fixtures at distinct addresses on
+the default port.
+
+The three single-device cases guard behavior that also holds before the
+endpoint identity. `endpoint-default-port` selects a broadcast-discovered
+device as `192.0.2.2:54211` and requires one inventory entry, one connection
+and, after the startup broadcast, no addressed discovery request other than
+the vendor library's single MAC check at connection; a device that the
+inventory lookup missed would be queried directly first. `endpoint-alt-port`
+runs one fixture on port 54221 and selects it with that port.
+`endpoint-hostname`
+selects a fixture as `fixture-a` and requires the inventory to hold its
+resolved address, and `endpoint-hostname-port` selects a fixture on port
+54221 as `fixture-a:54221`. `endpoint-wrong-port` selects `192.0.2.2:54231`,
+a discovery port nobody listens on, and requires the port to stay
+disconnected with INVALID input for twelve seconds, no connection at the
+fixture, an empty inventory and a normal exit.
+
+The reuse of an inventory entry for a device whose MAC is already known is
+not exercised, because a fixture answers at one address only; it is
+established by reading the source.
+
+For the original-behavior control, replace `measCompApp/src/measCompDiscover.cpp`
+in a scratch copy by the version from before the endpoint identity, as
+described for the MAC cases. `endpoint-same-ip` and `endpoint-mixed` must
+fail `endpoint second port reads its device` with the second port reporting
+22.5, and the six other cases must pass.
+
 ## Negative controls
 
 Apply each change separately to a scratch copy of the named source, rebuild
@@ -319,6 +393,8 @@ driver defect.
 | `refresh-no-throttle` | Set the minimum interval between discovery attempts to zero | `mac rediscovery requests while absent` in `mac-tc32-offline`; `mac absent port shares bounded discovery` in `mac-two-ports` |
 | `refresh-stalls-ports` | Hold the vendor lock for four seconds in every refresh | `mac first port continues polling` in `mac-two-ports` |
 | `refresh-interval-equals-retry` | Set the minimum interval between discovery attempts to five seconds | `mac second device connects with its own value` in `mac-two-ports` when a refresh is skipped; the result varies with the retry phase |
+| `endpoint-ignore-port` | Match a direct-discovery entry by IP address alone | `endpoint second port reads its device` in `endpoint-same-ip` and `endpoint-mixed` |
+| `endpoint-no-default-port` | Record port 0 instead of the default discovery port for broadcast-discovered entries | `endpoint broadcast-discovered device is not queried again` in `endpoint-default-port`; the inventory stays correct because the direct query's result is matched by MAC, and `endpoint-mixed` is unaffected because a MAC selector never reaches the address lookup |
 
 This test does not establish hardware power-cycle behavior, sustained network
 loss endurance, Channel Access client reconnection, EXP-32, USB or Windows support.

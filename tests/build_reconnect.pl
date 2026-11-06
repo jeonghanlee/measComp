@@ -126,7 +126,7 @@ sub main {
         "$repository/measCompApp/Db/measCompVoltageIn.template",
         "$repository/measCompApp/Db/measCompAnalogOut.template",
         "$RealBin/test_reconnect.pl", "$RealBin/TC32.pm", "$RealBin/build_reconnect.pl",
-        "$RealBin/E1608.pm",
+        "$RealBin/E1608.pm", "$RealBin/endpoint-hosts",
         "$asyn/include/asynDriver.h", "$include/uldaq.h", "$library/libuldaq.so");
     my %hashes;
     for my $path (@members) {

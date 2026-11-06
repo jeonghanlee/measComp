@@ -35,10 +35,10 @@ Existing failure observations below come from the linked issues at the baseline 
 | M3 | Analog enum initialization | Milestone | Complete | No | | Offline-start records obtain the same enums as online-start records; [detail](#m3---analog-enum-initialization) |
 | M4 | Analog conversion initialization | Milestone | Complete | No | | Offline-start conversion matches online-start conversion and measured raw values; [detail](#m4---analog-conversion-initialization) |
 | M5 | MAC device rediscovery | Milestone | Complete | No | | An initially absent MAC-selected device connects without disturbing existing ports; [detail](#m5---mac-device-rediscovery) |
-| M6 | Discovery endpoint identity | Milestone | Not started | Yes | | Devices sharing an IP but using different discovery ports remain independent; [detail](#m6---discovery-endpoint-identity) |
+| M6 | Discovery endpoint identity | Milestone | In progress | No | | Devices sharing an IP but using different discovery ports remain independent; [detail](#m6---discovery-endpoint-identity) |
 | M7 | Identifier case and refresh diagnostics | Milestone | Complete | No | | A lower-case MAC connects and a failed refresh is reported once; [detail](#m7---identifier-case-and-refresh-diagnostics) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: six Complete and one Not started. `Ready` records dependency readiness only; the remaining draft plan still requires acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
+The row order follows issue numbers and imposes no execution dependency. Current status: six Complete and one In progress. `Ready` records dependency readiness only; the remaining draft plan still requires acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
 
 ### Milestone Details
 
@@ -513,7 +513,7 @@ Recheck metadata with `gh issue view 6 --repo jeonghanlee/measComp --json state,
 Origin: 3bdd4f2 / M6
 Identity History: none
 GitHub Issue: [#7](https://github.com/jeonghanlee/measComp/issues/7)
-Status: Not started
+Status: In progress
 
 ##### Summary
 
@@ -548,12 +548,12 @@ Out of scope: changing the public device identifier syntax, treating discovery p
 
 Plan Status: accepted
 Plan Acceptance: 2026-11-06; accepted by the owner after three third-person passes on the plan against the current discovery code and the vendor sources, the last with no finding above the floor.
-Implementation Authorization: 2026-11-06; implement and verify the accepted plan items 1 to 4.
+Implementation Authorization: 2026-11-06; implement and verify the accepted plan items 1 to 4. Amended 2026-11-06 at the owner's direction after the implementation review: plan item 3 adds `endpoint-hostname-port` and `endpoint-wrong-port`, and T3 covers them.
 Superseded Plan Artifacts: none
 
 1. In `measCompApp/src/measCompDiscover.cpp`, add a per-entry discovery port array beside the inventory. The startup discovery and the M5 refresh record the default discovery port for every appended entry; the direct-discovery path records the requested port. Verified by T1 and T5.
 2. In the direct-IP branch, match an entry only when both its IP address and its port equal the resolved host and the requested port. After a direct descriptor query, look the result up by unique ID and reuse an existing entry; append otherwise. The MAC branch and the Windows branch keep their structure. Verified by T1, T3 and T5.
-3. Extend `tests/reconnect_ioc.cpp` and `tests/test_reconnect.pl` with endpoint cases: `endpoint-same-ip` (two ports at one IP, ports 54211 and 54221), `endpoint-mixed` (first port by MAC, second by IP and port 54221), and selector controls `endpoint-distinct-ip`, `endpoint-default-port` (one port with an explicit `:54211` selector for a device that also answers the startup broadcast, expecting one inventory entry and one connection; the omitted port is already exercised by every direct-IP case), `endpoint-alt-port` (a single device on 54221) and `endpoint-hostname` (a name from a bind-mounted hosts file). Record both fixtures' connection counts, request streams and the inventory listing. Verified by T1 to T3 and T5.
+3. Extend `tests/reconnect_ioc.cpp` and `tests/test_reconnect.pl` with endpoint cases: `endpoint-same-ip` (two ports at one IP, ports 54211 and 54221), `endpoint-mixed` (first port by MAC, second by IP and port 54221), and selector controls `endpoint-distinct-ip`, `endpoint-default-port` (one port with an explicit `:54211` selector for a device that also answers the startup broadcast, expecting one inventory entry and one connection; the omitted port is already exercised by every direct-IP case), `endpoint-alt-port` (a single device on 54221), `endpoint-hostname` (a name from a bind-mounted hosts file), `endpoint-hostname-port` (that name with port 54221) and `endpoint-wrong-port` (a port nobody listens on, expecting a disconnected port and an empty inventory). Record both fixtures' connection counts, request streams and the inventory listing. Verified by T1 to T3 and T5.
 4. Document the endpoint identity in `docs/reconnection.md`, and the cases, the mount namespace for the hostname case and the baseline control in `tests/README.md`. Verified by the second-person reader pass and T4.
 
 ##### Test Plan
@@ -562,7 +562,7 @@ Superseded Plan Artifacts: none
 | --- | --- | --- | --- | --- |
 | T1 | Integration | Run `endpoint-same-ip`: fixtures A (22.5, port 54211) and B (37.25, port 54221) at one IP, both present at startup; read both asyn ports, both fixtures' connection counts and the inventory. | Common integration environment; two external TC32 fixtures | Port A reads 22.5 and port B reads 37.25 with NO_ALARM; each fixture has exactly one connection; the inventory lists two distinct unique IDs. |
 | T2 | Integration | Within T1, count fixture A's connections over the whole run and measure the longest pause in its request stream from its first request to the end; both ports connect before the IOC reports ready, so continuity is observed through these totals. | Same environment | Fixture A has exactly one connection, never pauses longer than 3 seconds, and port A's value stays 22.5; the defect shows as a second connection to fixture A. |
-| T3 | Regression | Run `endpoint-distinct-ip`, `endpoint-default-port`, `endpoint-alt-port` and `endpoint-hostname`. These guard behavior that already holds before the change; they are not defect regressions. | Same environment; the hostname case in a mount namespace with a bind-mounted hosts file | Every selector connects to its intended device with its value; an explicit default-port selector for a broadcast-discovered device yields one inventory entry and one connection; the alternate-port device connects on 54221. |
+| T3 | Regression | Run `endpoint-distinct-ip`, `endpoint-default-port`, `endpoint-alt-port`, `endpoint-hostname`, `endpoint-hostname-port` and `endpoint-wrong-port`. These guard behavior that already holds before the change; they are not defect regressions. | Same environment; the hostname cases in a mount namespace with a bind-mounted hosts file | Every selector connects to its intended device with its value; an explicit default-port selector for a broadcast-discovered device yields one inventory entry and one connection; the alternate-port device connects on 54221, also by host name; a port nobody listens on leaves the port disconnected with an empty inventory. |
 | T4 | Regression | Build the source before this change with the final tests and run T1, T3 and T5; run the 18 shipped cases, the Perl checks on Debian 13 and Rocky 8, and the endpoint cases on a sanitizer build. | Same environment; Perl 5.40.1 and 5.26.3 | Baseline fails `endpoint-same-ip` and `endpoint-mixed` at the second port's value or connection assertion while the selector controls pass; the fixed tree passes everything with normal IOC exit and no sanitizer report. |
 | T5 | Integration | Run `endpoint-mixed`: fixture A selected by MAC through the startup broadcast, fixture B configured by IP and port 54221 at the same address. | Same environment; two external TC32 fixtures with broadcast replies | Port B reads 37.25 with its own connection; fixture A keeps one connection; the inventory lists two distinct unique IDs. |
 
@@ -570,15 +570,23 @@ Superseded Plan Artifacts: none
 
 | Label | Observed At | Environment | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| T1 | Not run | Common integration environment | Pending | None |
-| T2 | Not run | Common integration environment | Pending | None |
-| T3 | Not run | Common integration environment | Pending | None |
-| T4 | Not run | Common integration environment | Pending | None |
-| T5 | Not run | Common integration environment | Pending | None |
+| T1 | 2026-11-06T22:37:20Z to 22:43:16Z (fixed, README blocks); controls 22:47:55Z to 22:50:58Z | Debian 13; real IOC, Base 7.0.10, asyn 4.45.0, patched ULDAQ 1.2.2; two TC32 fixtures at one IP on ports 54211 and 54221 | Pass: `endpoint-same-ip` 6 assertions. Port A reads 22.5 and port B 37.25 with NO_ALARM; each fixture has one connection; the inventory lists the two MACs. The source before this change fails `endpoint second port reads its device`: port B reports 22.5, fixture B has no connection and fixture A has two. | `work/m6-endpoint/r4/build/`; `work/m6-endpoint/r4/y-baseline/` |
+| T2 | Same run | Same environment | Pass, within `endpoint-same-ip` and `endpoint-distinct-ip`: fixture A has exactly one connection over the whole run, its longest pause between requests from the first healthy reading is 0.70 seconds (0.74 in `endpoint-distinct-ip`), and port A keeps 22.5. On the source before this change fixture A receives a second connection. | Same directories |
+| T3 | Same run | Same environment; the hostname cases in a mount namespace with `tests/endpoint-hosts` bind-mounted over `/etc/hosts` | Pass: `endpoint-distinct-ip` 6, `endpoint-default-port` 6, `endpoint-alt-port` 5, `endpoint-hostname` 6, `endpoint-hostname-port` 6 and `endpoint-wrong-port` 3 assertions. The explicit default-port selector finds the broadcast-discovered entry with one inventory entry, one connection and a single addressed discovery request (the vendor's MAC check); the alternate-port device connects on 54221, also as `fixture-a:54221`; the hostname entries hold the resolved address; the unused port 54231 leaves the port disconnected with INVALID input, no fixture connection and an empty inventory, and the IOC exits normally. The six cases also pass on the source before this change. | Same directories |
+| T4 | Same run; Perl checks and sanitizer run 22:47:34Z | Same environment; Debian 13 Perl 5.40.1; Rocky 8 Perl 5.26.3 | Pass: the 14 existing cases 995 assertions, the 4 MAC cases 35 and the 8 endpoint cases 45, every IOC exit 0. Perl checks pass on both versions. The 8 endpoint cases pass on the AddressSanitizer and UBSan build with no report. In a first full run of the same tree, `bounds-e1608-offline` failed its 0.25-second `polling stopped before no-sample check` once; three single reruns and a rerun of the bounds block passed, and the final run passed, so the failure is a timing margin of that existing case and not a behavior of this change. | `work/m6-endpoint/r4/`; `perl-debian13.txt`; `perl-rocky8.txt`; `asan/`; first run in `work/m6-endpoint/r1/` |
+| T5 | Same run | Same environment; fixture A with broadcast replies selected by MAC, fixture B at the same IP on port 54221 selected by address | Pass: `endpoint-mixed` 7 assertions. Port B reads 37.25 with its own connection; fixture A keeps one connection, its longest pause is 0.74 seconds, and it receives one broadcast and one addressed discovery request; the inventory lists the two MACs. The source before this change fails `endpoint second port reads its device` with port B reporting 22.5. | Same directories |
+
+Source identity of the final run: `measCompDiscover.cpp` SHA-256 `330674c82f9ad58b573a328fe4fcd188b2fc356069ad579104c30e2db2ce0200`; `test_reconnect.pl` `ae687704bbf07a12a19aed2b555bc12786eacfd18e6fc701e819d2ba4cb49f26`; `build_reconnect.pl` `c9f049c2ba64934b717e0d27b49fcdd0941cfc472c1ef1da0bb993351478a400`; `endpoint-hosts` `deb74c11101f9a4003f103ab51310c762d32b6b1a8a7a3d9eb03b38285fd32a7`; patched ULDAQ library `6ff4e93258081a8936416698a798ffdd5536255deb8a2d681344fc4bc86439e4`. The 20 build input hashes were rechecked unchanged after execution. The source before this change is the committed `56352e0` discovery source built with the final test bytes.
+
+Negative controls on scratch copies of the final tree: `endpoint-ignore-port` (match the address alone) fails `endpoint second port reads its device` in `endpoint-same-ip` and `endpoint-mixed` exactly as the source before the change; `endpoint-no-default-port` (record port 0 for broadcast entries) fails `endpoint broadcast-discovered device is not queried again` in `endpoint-default-port` with two addressed discovery requests instead of one, while its inventory stays correct because the direct query's result is matched by MAC. Evidence is under `work/m6-endpoint/r4/y-*/`.
+
+Limits: the reuse of an inventory entry for a device whose MAC is already known is not exercised by a shipped case, because a fixture answers at one address only; the `endpoint-no-default-port` control shows the path working. The Windows direct-discovery branch has no cache and is not verified. Host name resolution is verified with a bind-mounted hosts file, not a name server.
 
 ##### Closure Evidence
 
-- None. No fix or successful post-fix verification is recorded.
+- Local implementation and verification are recorded; commit, landing and issue closure remain pending. All required checks passed and none is waived.
+- Review: three third-person passes on the plan before implementation, and one third-person pass on the implementation in the author's stance on 2026-11-06 that read the complete change, confirmed every inventory append records a port, repeated the two-port cases five times each and exercised a host name with a port and an unused port; it returned no finding above the floor and one observation that the owner directed to be applied as the two added cases.
+- Evidence: `work/m6-endpoint/` retains the builds with command and input hashes, every case's stdout, stderr, JSON and native runner status, the controls and the sanitizer run. These are local evidence paths; reproduce with the shipped builder and the cases in `tests/README.md`.
 
 ##### GitHub Projection
 
