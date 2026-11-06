@@ -12,7 +12,7 @@ Remote milestone observed at: 2026-11-06T19:16:41Z; state: open; five closed iss
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/1`.
 Baseline commit: 3bdd4f24d820579f3f423c7be968baf2bb413950
 
-Next session entry point: Prepare M7 (identifier case and refresh diagnostics) for commit; its checks passed and landing is pending. M6 (issue #7) remains a draft plan; accept a plan and record implementation authorization before starting it.
+Next session entry point: M1 through M5 and M7 are complete and landed on `origin/site`. M6 (issue #7) remains a draft plan; decide its cache identity, hostname verification and mixed-selection scenario, then accept the plan and record implementation authorization before starting it.
 
 ## Scope
 
@@ -36,9 +36,9 @@ Existing failure observations below come from the linked issues at the baseline 
 | M4 | Analog conversion initialization | Milestone | Complete | No | | Offline-start conversion matches online-start conversion and measured raw values; [detail](#m4---analog-conversion-initialization) |
 | M5 | MAC device rediscovery | Milestone | Complete | No | | An initially absent MAC-selected device connects without disturbing existing ports; [detail](#m5---mac-device-rediscovery) |
 | M6 | Discovery endpoint identity | Milestone | Not started | Yes | | Devices sharing an IP but using different discovery ports remain independent; [detail](#m6---discovery-endpoint-identity) |
-| M7 | Identifier case and refresh diagnostics | Milestone | In progress | No | | A lower-case MAC connects and a failed refresh is reported once; [detail](#m7---identifier-case-and-refresh-diagnostics) |
+| M7 | Identifier case and refresh diagnostics | Milestone | Complete | No | | A lower-case MAC connects and a failed refresh is reported once; [detail](#m7---identifier-case-and-refresh-diagnostics) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: five Complete, one In progress and one Not started. `Ready` records dependency readiness only; the remaining draft plan still requires acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
+The row order follows issue numbers and imposes no execution dependency. Current status: six Complete and one Not started. `Ready` records dependency readiness only; the remaining draft plan still requires acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
 
 ### Milestone Details
 
@@ -590,7 +590,7 @@ Recheck metadata with `gh issue view 7 --repo jeonghanlee/measComp --json state,
 Origin: 3bdd4f2 / M7
 Identity History: none
 GitHub Issue: none
-Status: In progress
+Status: Complete
 
 ##### Summary
 
@@ -645,7 +645,9 @@ Source identity of the final run: `measCompDiscover.cpp` SHA-256 prefix `55f3b40
 
 ##### Closure Evidence
 
-- Local implementation and verification are recorded; commit, landing and closure remain pending. No linked issue; closure requires landing evidence only.
+- The case-insensitive lookup, the refresh diagnostic, the test change and the documentation are implemented and verified in 09f2a2e78b05616f9c403122e97bdb8ea0e50d47. The commit contains the reviewed five-file selection. No check is waived.
+- Remote landing observed at 2026-11-06T20:51:26Z: after fetching origin, local HEAD and origin/site both resolved to 09f2a2e78b05616f9c403122e97bdb8ea0e50d47, their full-tree comparison produced no differences, their ahead/behind counts were zero, the working tree was clean, and the GitHub branch API returned the same commit. Recheck with `git -C /data/gitsrc/measComp fetch origin`, `git -C /data/gitsrc/measComp rev-parse HEAD origin/site` and `git -C /data/gitsrc/measComp diff HEAD origin/site`.
+- No linked issue; required verification and repository landing are complete, and no external condition is waived.
 - Review: two third-person passes in the author's stance on 2026-11-06, the second after the findings were applied; one minor finding on the README baseline description was applied.
 
 ##### GitHub Projection
