@@ -12,7 +12,7 @@ Remote milestone observed at: 2026-11-06T19:16:41Z; state: open; five closed iss
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/1`.
 Baseline commit: 3bdd4f24d820579f3f423c7be968baf2bb413950
 
-Next session entry point: M1 through M5 and M7 are complete and landed on `origin/site`. M6 (issue #7) remains a draft plan; decide its cache identity, hostname verification and mixed-selection scenario, then accept the plan and record implementation authorization before starting it.
+Next session entry point: Implement M6 (issue #7) from its accepted plan in `measCompApp/src/measCompDiscover.cpp` and the endpoint test cases; M1 through M5 and M7 are complete and landed on `origin/site`.
 
 ## Scope
 
@@ -538,27 +538,33 @@ Out of scope: changing the public device identifier syntax, treating discovery p
 ##### Dependencies And Decisions
 
 - None. M5 and M6 share discovery code but solve different conditions and retain separate acceptance checks.
+- Decision Date: 2026-11-06. Reproduced on the current code after M5 and M7: two fixtures at one IP on discovery ports 54211 and 54221 give the second asyn port the first device's value with a healthy state, the second fixture receives no connection and the first fixture receives two. Distinct-IP fixtures behave correctly. The same symptom appears when the first device is found by MAC through the startup broadcast and the second is configured by IP and the other port, so broadcast-discovered entries need an endpoint identity too; theirs is the default discovery port.
+- Decision Date: 2026-11-06. Cache identity for direct discovery is the resolved IP address plus the discovery port, kept in a separate per-entry port array; `reserved` keeps holding the IP address alone, so the `measCompShowDevices` output and the M5 IP-copy step are unchanged. Broadcast-discovered entries record the default discovery port.
+- Decision Date: 2026-11-06. After a direct descriptor query, an entry whose unique ID is already in the inventory is reused instead of appended, so one device reached through two equivalent selectors keeps one entry and one vendor object.
+- Decision Date: 2026-11-06. Hostname resolution is verified automatically in a namespace that also unshares the mount namespace and bind-mounts a test hosts file; the host's own hosts file is never changed. The vendor library resolves names with `getaddrinfo`, which reads that file.
+- Decision Date: 2026-11-06. The mixed scenario, first device by MAC and second by IP with the other port at the same address, is part of the verification.
 
 ##### Implementation Plan
 
-Plan Status: draft
-Plan Acceptance: none
-Implementation Authorization: none
+Plan Status: accepted
+Plan Acceptance: 2026-11-06; accepted by the owner after three third-person passes on the plan against the current discovery code and the vendor sources, the last with no finding above the floor.
+Implementation Authorization: 2026-11-06; implement and verify the accepted plan items 1 to 4.
 Superseded Plan Artifacts: none
 
-1. Store and compare a normalized direct-discovery endpoint containing the resolved IP address and discovery port instead of matching the host alone.
-2. Preserve vendor descriptor fields and MAC identity; handle broadcast-discovered descriptors and default-port equivalence explicitly.
-3. Add two real asyn ports backed by distinct external devices at one IP, recording both endpoint traffic and the first device's connection continuity.
-4. Add the selection control matrix for distinct IPs, default and alternate discovery ports, hostname resolution and MAC selection.
+1. In `measCompApp/src/measCompDiscover.cpp`, add a per-entry discovery port array beside the inventory. The startup discovery and the M5 refresh record the default discovery port for every appended entry; the direct-discovery path records the requested port. Verified by T1 and T5.
+2. In the direct-IP branch, match an entry only when both its IP address and its port equal the resolved host and the requested port. After a direct descriptor query, look the result up by unique ID and reuse an existing entry; append otherwise. The MAC branch and the Windows branch keep their structure. Verified by T1, T3 and T5.
+3. Extend `tests/reconnect_ioc.cpp` and `tests/test_reconnect.pl` with endpoint cases: `endpoint-same-ip` (two ports at one IP, ports 54211 and 54221), `endpoint-mixed` (first port by MAC, second by IP and port 54221), and selector controls `endpoint-distinct-ip`, `endpoint-default-port` (one port with an explicit `:54211` selector for a device that also answers the startup broadcast, expecting one inventory entry and one connection; the omitted port is already exercised by every direct-IP case), `endpoint-alt-port` (a single device on 54221) and `endpoint-hostname` (a name from a bind-mounted hosts file). Record both fixtures' connection counts, request streams and the inventory listing. Verified by T1 to T3 and T5.
+4. Document the endpoint identity in `docs/reconnection.md`, and the cases, the mount namespace for the hostname case and the baseline control in `tests/README.md`. Verified by the second-person reader pass and T4.
 
 ##### Test Plan
 
 | Label | Layer | Method | Environment | Expected Result |
 | --- | --- | --- | --- | --- |
-| T1 | Integration | Configure two fixtures with different MACs and temperatures at one documentation-range IP and two discovery ports; read both real asyn ports. | Common integration environment; two external TC32 devices | Values remain `22.5` and `37.25` at their intended ports; both endpoints receive real requests. |
-| T2 | Integration | Establish the first connection before configuring the second and observe endpoint connections throughout. | Common integration environment; same-IP fixtures | Configuring the second endpoint neither reconnects nor replaces the first connection. |
-| T3 | Regression | Exercise distinct IPs, omitted versus explicit default discovery port, a single alternate port, hostname resolution and MAC selection. | Common integration environment; external fixtures and namespace-local name resolution | Each supported selector reaches its intended device and equivalent default-port selectors preserve identity. |
-| T4 | Regression | Build the affected baseline and fixed tree with identical dependencies and run the same two-endpoint regression. | Common integration environment | Baseline fails the endpoint-selection assertion; fixed code passes it with actual requests to both endpoints and normal IOC exit. |
+| T1 | Integration | Run `endpoint-same-ip`: fixtures A (22.5, port 54211) and B (37.25, port 54221) at one IP, both present at startup; read both asyn ports, both fixtures' connection counts and the inventory. | Common integration environment; two external TC32 fixtures | Port A reads 22.5 and port B reads 37.25 with NO_ALARM; each fixture has exactly one connection; the inventory lists two distinct unique IDs. |
+| T2 | Integration | Within T1, count fixture A's connections over the whole run and measure the longest pause in its request stream from its first request to the end; both ports connect before the IOC reports ready, so continuity is observed through these totals. | Same environment | Fixture A has exactly one connection, never pauses longer than 3 seconds, and port A's value stays 22.5; the defect shows as a second connection to fixture A. |
+| T3 | Regression | Run `endpoint-distinct-ip`, `endpoint-default-port`, `endpoint-alt-port` and `endpoint-hostname`. These guard behavior that already holds before the change; they are not defect regressions. | Same environment; the hostname case in a mount namespace with a bind-mounted hosts file | Every selector connects to its intended device with its value; an explicit default-port selector for a broadcast-discovered device yields one inventory entry and one connection; the alternate-port device connects on 54221. |
+| T4 | Regression | Build the source before this change with the final tests and run T1, T3 and T5; run the 18 shipped cases, the Perl checks on Debian 13 and Rocky 8, and the endpoint cases on a sanitizer build. | Same environment; Perl 5.40.1 and 5.26.3 | Baseline fails `endpoint-same-ip` and `endpoint-mixed` at the second port's value or connection assertion while the selector controls pass; the fixed tree passes everything with normal IOC exit and no sanitizer report. |
+| T5 | Integration | Run `endpoint-mixed`: fixture A selected by MAC through the startup broadcast, fixture B configured by IP and port 54221 at the same address. | Same environment; two external TC32 fixtures with broadcast replies | Port B reads 37.25 with its own connection; fixture A keeps one connection; the inventory lists two distinct unique IDs. |
 
 ##### Verification Results
 
@@ -568,6 +574,7 @@ Superseded Plan Artifacts: none
 | T2 | Not run | Common integration environment | Pending | None |
 | T3 | Not run | Common integration environment | Pending | None |
 | T4 | Not run | Common integration environment | Pending | None |
+| T5 | Not run | Common integration environment | Pending | None |
 
 ##### Closure Evidence
 
@@ -581,7 +588,7 @@ GitHub Milestone: Connection recovery and device selection
 Observed State: open
 Observed Labels: bug
 Observed Milestone: Connection recovery and device selection (milestone 1)
-Last Compared: 2026-11-05T18:05:51Z; remote updated at 2026-11-05T18:05:33Z
+Last Compared: 2026-11-06T21:27:12Z; remote updated at 2026-11-05T18:05:33Z
 
 Recheck metadata with `gh issue view 7 --repo jeonghanlee/measComp --json state,labels,milestone,updatedAt`.
 
