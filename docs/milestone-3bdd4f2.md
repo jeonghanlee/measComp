@@ -8,11 +8,11 @@ Git upstream: origin/site
 Remote tracker: [jeonghanlee/measComp milestone 1](https://github.com/jeonghanlee/measComp/milestone/1)
 GitHub milestone: Connection recovery and device selection
 Due date: none
-Remote milestone observed at: 2026-11-07T00:06:21Z; state: open; six closed issues and no open issue
+Remote milestone observed at: 2026-11-07T17:39:15Z; state: open; six closed issues and no open issue
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/1`.
 Baseline commit: 3bdd4f24d820579f3f423c7be968baf2bb413950
 
-Next session entry point: Land the M8 implementation (issue #8), then synchronize and close the issue and set M8 Complete; M1 through M7 are complete and landed on `origin/site`, and M9 in the Backlog awaits an owner decision.
+Next session entry point: All eight work units are complete and landed on `origin/site`; the six milestone issues and issue #8 are closed. Backlog M9 (USB counter poller exit race) awaits an owner decision, and closing the GitHub milestone is the owner's step, which this document does not perform.
 
 ## Scope
 
@@ -20,7 +20,7 @@ This document assigns issues #2 through #7 to six work units, plus one follow-up
 
 The common integration environment is Linux with the real measComp driver, EPICS Base 7.0.10, asyn 4.45 and patched ULDAQ 1.2.2. Extend the shipped Perl/Bash tests and retain `tests/reconnect_ioc.cpp`; use external device protocol fixtures, without replacing internal driver, asyn or ULDAQ functions. Record the source commit, dependency identities, assertions, fixture requests and native IOC exit status for each executed check. Checks reproducing a defect must fail for the intended assertion on the affected baseline and pass on the fixed code; setup and build failures do not establish a regression. Compatibility checks and positive controls must pass on both the baseline and fixed code. When a check combines these purposes, record the defect assertion separately from its controls.
 
-Existing failure observations below come from the linked issues at the baseline commit. They are not successful verification of a fix. M1 through M7 record observed post-fix verification, repository landing and, where an issue is linked, its closure. The analog metadata findings are separate from the normal floating-point TC32 temperature path. MAC rediscovery and same-IP/different-discovery-port selection retain their specific applicability conditions.
+Existing failure observations below come from the linked issues at the baseline commit. They are not successful verification of a fix. M1 through M8 record observed post-fix verification, repository landing and, where an issue is linked, its closure. The analog metadata findings are separate from the normal floating-point TC32 temperature path. MAC rediscovery and same-IP/different-discovery-port selection retain their specific applicability conditions.
 
 **Out of scope:** ULDAQ vendor patch development, upstream submissions, release numbering, tags, deployment, output-command replay, and a general qualification of Windows, USB, EXP-32 or hardware power cycling. Changes to `docs/reconnection.md` and `tests/README.md` belong to the affected work unit when behavior or test invocation changes. Existing test limitations remain explicit.
 
@@ -37,9 +37,9 @@ Existing failure observations below come from the linked issues at the baseline 
 | M5 | MAC device rediscovery | Milestone | Complete | No | | An initially absent MAC-selected device connects without disturbing existing ports; [detail](#m5---mac-device-rediscovery) |
 | M6 | Discovery endpoint identity | Milestone | Complete | No | | Devices sharing an IP but using different discovery ports remain independent; [detail](#m6---discovery-endpoint-identity) |
 | M7 | Identifier case and refresh diagnostics | Milestone | Complete | No | | A lower-case MAC connects and a failed refresh is reported once; [detail](#m7---identifier-case-and-refresh-diagnostics) |
-| M8 | Two-port IOC exit race | Carry-forward | In progress | No | | An IOC with two measComp ports exits normally on every request; [detail](#m8---two-port-ioc-exit-race) |
+| M8 | Two-port IOC exit race | Carry-forward | Complete | No | | An IOC with two measComp ports exits normally on every request; [detail](#m8---two-port-ioc-exit-race) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: seven Complete and one In progress. `Ready` records dependency readiness only; no row is Not started. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
+The row order follows issue numbers and imposes no execution dependency. Current status: eight Complete. `Ready` records dependency readiness only; no row is Not started. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
 
 ### Assignment History
 
@@ -686,7 +686,7 @@ Observed State: not projected
 Origin: 3bdd4f2 / M8
 Identity History: none
 GitHub Issue: [#8](https://github.com/jeonghanlee/measComp/issues/8)
-Status: In progress
+Status: Complete
 
 ##### Summary
 
@@ -748,7 +748,9 @@ Limits: the single-port exit path was measured only in one loop of 60 normal exi
 ##### Closure Evidence
 
 - Review on 2026-11-07: one third-person pass and three second-person passes (register reader, operator of the exit loop, maintainer of the code). The third-person pass read the complete change, recounted the recorded diagnosis, ran a 60-exit single-port loop, the loop script's failure path and a duration comparison against the original driver; the passes found one wrong count, a stale entry point, one unmeasured exit delay, two unclear README passages and one unused include, all corrected, and the last pass returned no finding above the floor. A similar poller in `drvUSBCTR.cpp` is outside this unit and is registered in the Backlog.
-- Implementation and verification are recorded; commit, landing and issue closure remain pending. All required checks passed, with the recorded timing exception of an existing case, and none is waived.
+- The poller stop and join exit handler, the interruptible poll wait, the normal exit of every test case, the exit loop script and the documentation are implemented and verified in 5a0fb27061333b236778ebca331d315f2debdeab. The commit contains the reviewed six-file selection and its `Refs #8` footer does not close the issue. All required checks passed, with the recorded timing exception of an existing case that also occurs on the original driver, and none is waived.
+- Remote landing observed at 2026-11-07T17:34:09Z and again at 2026-11-07T17:39:14Z: after fetching origin, local HEAD and origin/site both resolved to 5a0fb27061333b236778ebca331d315f2debdeab, their full-tree comparison produced no differences, their ahead/behind counts were zero, the working tree was clean, and the GitHub branch API returned the same commit. Recheck with `git -C /data/gitsrc/measComp fetch origin`, `git -C /data/gitsrc/measComp rev-parse HEAD origin/site` and `git -C /data/gitsrc/measComp diff HEAD origin/site`.
+- Issue #8 was closed as completed at 2026-11-07T17:38:34Z, observed at 2026-11-07T17:39:14Z. Its body matches the prepared implementation and verification record, with all three acceptance criteria checked. The completion comment references 5a0fb27061333b236778ebca331d315f2debdeab. Required verification, repository landing and linked-issue closure are complete; no check or external condition is waived.
 - Diagnosis observed 2026-11-07 on the unchanged driver with a normal-exit test IOC: 5 aborts in 240 normal exits of the two-port cases (`endpoint-same-ip` 2 of 90 on the plain build and 3 of 90 on the sanitizer build, `mac-two-ports` 0 of 60), every abort with the stack `pollerThreadC`, `pollerThread`, `disconnect`, `ulDisconnectDaqDevice`, pure virtual call, and the `pthread_mutex_destroy failed` message in every exit; the raw runs are local evidence under `work/m8-diag/`. No plan is accepted yet.
 
 ##### GitHub Projection
@@ -756,10 +758,10 @@ Limits: the single-port exit path was measured only in one loop of 60 normal exi
 Title: Stop port poller threads before the IOC exit unloads the vendor library
 Labels: bug
 GitHub Milestone: none
-Observed State: open
+Observed State: closed (completed)
 Observed Labels: bug
 Observed Milestone: none
-Last Compared: 2026-11-07T02:12:35Z; remote updated at 2026-11-07T02:12:35Z
+Last Compared: 2026-11-07T17:39:14Z; remote updated at 2026-11-07T17:38:34Z
 
 ## Backlog
 
