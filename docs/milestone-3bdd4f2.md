@@ -12,7 +12,7 @@ Remote milestone observed at: 2026-11-07T00:06:21Z; state: open; six closed issu
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/1`.
 Baseline commit: 3bdd4f24d820579f3f423c7be968baf2bb413950
 
-Next session entry point: Run the M8 diagnosis (repeated exits of the unchanged two-port IOC with the abort backtrace), then correct the M8 plan and issue #8 and request plan acceptance; M1 through M7 are complete and landed on `origin/site`.
+Next session entry point: Implement M8 (issue #8) from its accepted plan in `measCompApp/src/drvMultiFunction.cpp` and the two-port test cases; M1 through M7 are complete and landed on `origin/site`.
 
 ## Scope
 
@@ -714,9 +714,9 @@ Out of scope: changing reconnection policy, discovery behavior, patching the ven
 
 ##### Implementation Plan
 
-Plan Status: draft
-Plan Acceptance: none
-Implementation Authorization: none
+Plan Status: accepted
+Plan Acceptance: 2026-11-07; accepted by the owner after the diagnosis of the abort on the unchanged driver, its stack and failure rate, and the vendor library's exit-time device release were read from the sources and the recorded runs.
+Implementation Authorization: 2026-11-07; implement and verify the accepted plan items 1 to 3.
 Superseded Plan Artifacts: none
 
 1. In `measCompApp/src/drvMultiFunction.cpp`, create the poller thread joinable with `epicsThreadCreateOpt()`, add a stop flag that `pollerThread()` checks each cycle outside the device lock, and register an `epicsAtExit()` handler when the port is constructed that sets the flag and joins the thread. Verified by T1.
