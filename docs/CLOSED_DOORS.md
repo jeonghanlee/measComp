@@ -1,0 +1,8 @@
+# Closed Doors
+
+Examined candidates that the owner decided to leave unchanged. They are not work rows. Each entry records the verdict, the premise that was examined, the evidence, the decision date and the commit whose state was examined.
+
+| Candidate | Verdict | Premise | Evidence | Decision Date | Examined Commit |
+| --- | --- | --- | --- | --- | --- |
+| Verify the Windows branches of `measCompApp/src/measCompDiscover.cpp` | Keep | The `WIN32` branches of the device inventory, MAC refresh, identifier matching and endpoint identity share the structure of the Linux branches but are never compiled or run on Linux, and the Windows branch cannot read a device IP address, so the IP cache does not apply there. The owner does not deploy this driver on Windows. | `docs/milestone-3bdd4f2.md`, unverified-branch notes in the connection recovery and device selection details; the branches sit under `#ifdef WIN32` in `measCompApp/src/measCompDiscover.cpp`. | 2026-11-06 | a08918a9607f9c107b4bf5384af9600471ca920c |
+| Build-verify `measCompApp/src/drvUSBCTR.cpp` as a caller of `measCompCreateDevice()` | Keep | The file includes `drvMca.h` from the separate `mca` module, which is absent from the available build environment, so it cannot be compiled here. The function's declaration and signature did not change and the MAC refresh applies only to identifiers that are not in the inventory, so the caller's behavior is not expected to change. | Compiling the file stops at `fatal error: drvMca.h: No such file or directory`; `docs/milestone-3bdd4f2.md` records it as an unverified consumer. | 2026-11-06 | a08918a9607f9c107b4bf5384af9600471ca920c |
