@@ -12,11 +12,11 @@ Remote milestone observed at: 2026-11-07T00:06:21Z; state: open; six closed issu
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/1`.
 Baseline commit: 3bdd4f24d820579f3f423c7be968baf2bb413950
 
-Next session entry point: All seven work units are complete and landed on `origin/site`; the six linked issues are closed. The remaining action is closing the GitHub milestone, which this document does not perform.
+Next session entry point: Run the M8 diagnosis (repeated exits of the unchanged two-port IOC with the abort backtrace), then correct the M8 plan and issue #8 and request plan acceptance; M1 through M7 are complete and landed on `origin/site`.
 
 ## Scope
 
-This document assigns issues #2 through #7 to six work units, plus one follow-up work unit without an issue, for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. All seven work units are complete.
+This document assigns issues #2 through #7 to six work units, plus one follow-up work unit without an issue and one carry-forward work unit tracked by issue #8, for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. All seven work units are complete.
 
 The common integration environment is Linux with the real measComp driver, EPICS Base 7.0.10, asyn 4.45 and patched ULDAQ 1.2.2. Extend the shipped Perl/Bash tests and retain `tests/reconnect_ioc.cpp`; use external device protocol fixtures, without replacing internal driver, asyn or ULDAQ functions. Record the source commit, dependency identities, assertions, fixture requests and native IOC exit status for each executed check. Checks reproducing a defect must fail for the intended assertion on the affected baseline and pass on the fixed code; setup and build failures do not establish a regression. Compatibility checks and positive controls must pass on both the baseline and fixed code. When a check combines these purposes, record the defect assertion separately from its controls.
 
@@ -37,8 +37,15 @@ Existing failure observations below come from the linked issues at the baseline 
 | M5 | MAC device rediscovery | Milestone | Complete | No | | An initially absent MAC-selected device connects without disturbing existing ports; [detail](#m5---mac-device-rediscovery) |
 | M6 | Discovery endpoint identity | Milestone | Complete | No | | Devices sharing an IP but using different discovery ports remain independent; [detail](#m6---discovery-endpoint-identity) |
 | M7 | Identifier case and refresh diagnostics | Milestone | Complete | No | | A lower-case MAC connects and a failed refresh is reported once; [detail](#m7---identifier-case-and-refresh-diagnostics) |
+| M8 | Two-port IOC exit race | Carry-forward | Not started | Yes | | An IOC with two measComp ports exits normally on every request; [detail](#m8---two-port-ioc-exit-race) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: seven Complete. `Ready` records dependency readiness only; no row is Not started. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
+The row order follows issue numbers and imposes no execution dependency. Current status: seven Complete and one Not started. `Ready` records dependency readiness only; M8 has no dependency. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
+
+### Assignment History
+
+| Work Identity | From Canonical | To Canonical | Target Commit | Authority Moved At |
+| --- | --- | --- | --- | --- |
+| M8 two-port IOC exit race | docs/milestone-3bdd4f2.md, Backlog | docs/milestone-3bdd4f2.md, Milestone | this synchronization commit | this synchronization commit |
 
 ### Milestone Details
 
@@ -674,42 +681,36 @@ Labels: none
 GitHub Milestone: none
 Observed State: not projected
 
-## Backlog
-
-### Work
-
-| ID | Work unit | Type | Status | Ready | Deps | Done when / Evidence |
-| --- | --- | --- | --- | --- | --- | --- |
-| M8 | Two-port IOC exit race | Carry-forward | Open | No | | An IOC with two measComp ports exits normally on every request; priority and scope are undecided; [detail](#m8---two-port-ioc-exit-race) |
-
-### Backlog Details
-
 #### M8 - Two-Port IOC Exit Race
 
 Origin: 3bdd4f2 / M8
 Identity History: none
 GitHub Issue: [#8](https://github.com/jeonghanlee/measComp/issues/8)
-Status: Open
+Status: Not started
 
 ##### Summary
 
-An IOC that configures two measComp ports can abort while exiting: the driver's exit handlers destroy a port object while its poller thread still runs, producing `pthread_mutex_destroy failed` or a pure virtual call and a SIGABRT in roughly one of fifteen exits. The defect was observed on both the original driver and the changed driver, so it predates this milestone and is not caused by it. The shipped two-port test cases end the IOC directly with `_exit(0)` and assert only that it stops on request; the limit is documented in `tests/README.md`.
+An IOC that configures two measComp ports can abort while exiting: in a loop of normal exits with both ports at one address about 2 to 3 percent of the exits end with `pure virtual method called` and SIGABRT, and every exit prints `epicsMutex pthread_mutex_destroy failed`. The ULDAQ library registers `lib_unload()` as a library destructor that deletes every `DaqDevice` during `exit()`, while the driver's poller threads still run; a poller then calls `ulDisconnectDaqDevice()` on a device object that is being destroyed. asyn is not involved, because `MultiFunction` does not use `ASYN_DESTRUCTIBLE`. The abort was observed on the baseline and on the later head alike, so it predates this milestone. The shipped two-port test cases end the IOC directly with `_exit(0)` and assert only that it stops on request; the limit is documented in `tests/README.md`.
 
 ##### Scope
 
-Make the driver's exit path stop and join every port's poller thread before any port object, mutex or vendor handle is destroyed, so a two-port IOC exits normally on every request.
+Make the driver stop and join every port's poller thread in an `epicsAtExit()` handler, which runs before `exit()` unloads the vendor library and destroys the global mutex, so a two-port IOC exits normally on every request.
 
-Out of scope: changing reconnection policy, discovery behavior, or the single-port exit path unless the same defect appears there.
+Out of scope: changing reconnection policy, discovery behavior, patching the vendor library, or the single-port exit path unless the same defect appears there.
 
 ##### Completion Criteria
 
-- Repeated exits of a two-port IOC, with devices online and offline, complete without an abort or a sanitizer report.
+- A loop of at least 150 normal exits of a two-port IOC with both ports at one address completes with exit status 0, no abort, no sanitizer report and no `pthread_mutex_destroy failed` message, while the same loop on the unchanged driver shows the abort.
 - The two-port test cases exit through the normal IOC exit path and assert a zero exit status.
-- The existing single-port and two-port cases pass unchanged apart from that exit assertion.
+- The single-port cases and the other two-port assertions pass unchanged.
+- The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
 
 ##### Dependencies And Decisions
 
-- None. Priority and scope await an owner decision; the row stays Open until then.
+- None. No work or external gate must complete first.
+- Decision Date: 2026-11-06. The owner assigned this unit to the Milestone section of this document; the GitHub issue gets no GitHub milestone.
+- Decision Date: 2026-11-06. A diagnosis of the abort precedes acceptance of the plan below: repeated exits of the unchanged two-port IOC measure the failure rate and capture the abort backtrace. The diagnosis is complete and the summary states its result.
+- Decision Date: 2026-11-07. The fix stays in the driver and does not patch the vendor library, whose `lib_unload()` deletes the device objects during `exit()`; the driver stops its pollers earlier, in an `epicsAtExit()` handler that `epicsExit()` runs before `exit()`.
 
 ##### Implementation Plan
 
@@ -718,30 +719,47 @@ Plan Acceptance: none
 Implementation Authorization: none
 Superseded Plan Artifacts: none
 
-1. Reproduce the abort with a counted loop of two-port exits on the unchanged driver, then fix the exit ordering and rerun the same loop.
+1. In `measCompApp/src/drvMultiFunction.cpp`, create the poller thread joinable with `epicsThreadCreateOpt()`, add a stop flag that `pollerThread()` checks each cycle outside the device lock, and register an `epicsAtExit()` handler when the port is constructed that sets the flag and joins the thread. Verified by T1.
+2. In `tests/reconnect_ioc.cpp`, remove the direct `_exit(0)` for two-port runs and correct the comment that blames port object destruction; in `tests/test_reconnect.pl`, assert a zero exit status for the two-port cases and add a counted exit loop mode for `endpoint-same-ip`. Verified by T1 and T2.
+3. Correct the matching sentence in `tests/README.md` and document the loop. Verified by T3 reader check and T2.
 
 ##### Test Plan
 
 | Label | Layer | Method | Environment | Expected Result |
 | --- | --- | --- | --- | --- |
-| T1 | Integration | Run the two-port cases with the normal IOC exit path in a counted loop of at least 50 exits, devices online and offline. | Common integration environment; external TC32 fixtures | Every exit has status 0 and no sanitizer report; the unchanged driver aborts in some exits. |
+| T1 | Integration | Run the `endpoint-same-ip` case with the normal IOC exit path in a counted loop of 150 exits, three at a time, on the fixed driver and on the unchanged driver with the same final tests. | Common integration environment; two external TC32 fixtures at one address | The fixed driver: every exit status 0, no abort, no `pthread_mutex_destroy failed`. The unchanged driver: at least one abort with the pure virtual call. |
+| T2 | Regression | Run the 18 shipped cases and the 8 endpoint cases, the Perl checks on Debian 13 and Rocky 8, and the loop of T1 on the sanitizer build. | Same environment; Perl 5.40.1 and 5.26.3 | All pass with normal IOC exit and no sanitizer report. |
+| T3 | Review | Read the changed `tests/README.md` and `tests/reconnect_ioc.cpp` comment as a stranger. | Repository documents | The exit behavior and the loop are described without the removed claim about port object destruction. |
 
 ##### Verification Results
 
 | Label | Observed At | Environment | Result | Evidence |
 | --- | --- | --- | --- | --- |
 | T1 | Not run | Common integration environment | Pending | none |
+| T2 | Not run | Common integration environment | Pending | none |
+| T3 | Not run | Repository documents | Pending | none |
 
 ##### Closure Evidence
 
-- The abort was observed in about one of fifteen hot exits on both the original and the changed driver during the MAC rediscovery work; the raw runs are local evidence under `work/m5-mac/`. No fix or accepted plan exists.
+- Diagnosis observed 2026-11-07 on the unchanged driver with a normal-exit test IOC: 5 aborts in 210 normal exits of the two-port cases (`endpoint-same-ip` 2 of 90 on the plain build and 3 of 90 on the sanitizer build, `mac-two-ports` 0 of 60), every abort with the stack `pollerThreadC`, `pollerThread`, `disconnect`, `ulDisconnectDaqDevice`, pure virtual call, and the `pthread_mutex_destroy failed` message in every exit; the raw runs are local evidence under `work/m8-diag/`. No plan is accepted yet.
 
 ##### GitHub Projection
 
-Title: Stop port poller threads before the IOC exit tears down port objects
+Title: Stop port poller threads before the IOC exit unloads the vendor library
 Labels: bug
 GitHub Milestone: none
 Observed State: open
 Observed Labels: bug
 Observed Milestone: none
-Last Compared: 2026-11-07T00:58:57Z; remote updated at 2026-11-07T00:58:52Z
+Last Compared: 2026-11-07T02:12:35Z; remote updated at 2026-11-07T02:12:35Z
+
+## Backlog
+
+### Work
+
+| ID | Work unit | Type | Status | Ready | Deps | Done when / Evidence |
+| --- | --- | --- | --- | --- | --- | --- |
+
+### Backlog Details
+
+None. All assigned work is in the Milestone section.
