@@ -680,7 +680,68 @@ Observed State: not projected
 
 | ID | Work unit | Type | Status | Ready | Deps | Done when / Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
+| M8 | Two-port IOC exit race | Carry-forward | Open | No | | An IOC with two measComp ports exits normally on every request; priority and scope are undecided; [detail](#m8---two-port-ioc-exit-race) |
 
 ### Backlog Details
 
-None. All six assigned issues are in the Milestone section.
+#### M8 - Two-Port IOC Exit Race
+
+Origin: 3bdd4f2 / M8
+Identity History: none
+GitHub Issue: [#8](https://github.com/jeonghanlee/measComp/issues/8)
+Status: Open
+
+##### Summary
+
+An IOC that configures two measComp ports can abort while exiting: the driver's exit handlers destroy a port object while its poller thread still runs, producing `pthread_mutex_destroy failed` or a pure virtual call and a SIGABRT in roughly one of fifteen exits. The defect was observed on both the original driver and the changed driver, so it predates this milestone and is not caused by it. The shipped two-port test cases end the IOC directly with `_exit(0)` and assert only that it stops on request; the limit is documented in `tests/README.md`.
+
+##### Scope
+
+Make the driver's exit path stop and join every port's poller thread before any port object, mutex or vendor handle is destroyed, so a two-port IOC exits normally on every request.
+
+Out of scope: changing reconnection policy, discovery behavior, or the single-port exit path unless the same defect appears there.
+
+##### Completion Criteria
+
+- Repeated exits of a two-port IOC, with devices online and offline, complete without an abort or a sanitizer report.
+- The two-port test cases exit through the normal IOC exit path and assert a zero exit status.
+- The existing single-port and two-port cases pass unchanged apart from that exit assertion.
+
+##### Dependencies And Decisions
+
+- None. Priority and scope await an owner decision; the row stays Open until then.
+
+##### Implementation Plan
+
+Plan Status: draft
+Plan Acceptance: none
+Implementation Authorization: none
+Superseded Plan Artifacts: none
+
+1. Reproduce the abort with a counted loop of two-port exits on the unchanged driver, then fix the exit ordering and rerun the same loop.
+
+##### Test Plan
+
+| Label | Layer | Method | Environment | Expected Result |
+| --- | --- | --- | --- | --- |
+| T1 | Integration | Run the two-port cases with the normal IOC exit path in a counted loop of at least 50 exits, devices online and offline. | Common integration environment; external TC32 fixtures | Every exit has status 0 and no sanitizer report; the unchanged driver aborts in some exits. |
+
+##### Verification Results
+
+| Label | Observed At | Environment | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| T1 | Not run | Common integration environment | Pending | none |
+
+##### Closure Evidence
+
+- The abort was observed in about one of fifteen hot exits on both the original and the changed driver during the MAC rediscovery work; the raw runs are local evidence under `work/m5-mac/`. No fix or accepted plan exists.
+
+##### GitHub Projection
+
+Title: Stop port poller threads before the IOC exit tears down port objects
+Labels: bug
+GitHub Milestone: none
+Observed State: open
+Observed Labels: bug
+Observed Milestone: none
+Last Compared: 2026-11-07T00:58:57Z; remote updated at 2026-11-07T00:58:52Z
