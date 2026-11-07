@@ -262,14 +262,9 @@ inventory listing must still contain both MAC addresses, and the first port
 must reconnect from its inventory entry with a valid reading and without
 another discovery request.
 
-The two-port cases end the IOC directly and check only that it stops on
-request. With two ports the driver's exit handlers can destroy a port object
-while its poller thread still runs. A scratch variant of `mac-two-ports` with
-both devices present from the start and the normal exit, run 15 times against
-each driver and not kept in the repository, aborted once with the original
-driver and once with the fixed driver, so the race is not part of this change.
-The cases with one port keep the normal exit through the exit handlers and
-still require exit status zero.
+Every case leaves the IOC through the normal exit and requires exit status
+zero, including the cases with two ports. The driver stops and joins its poller
+threads in an exit handler; see the exit loop below for the repeated check.
 
 The Ethernet-only restriction of the refresh is not exercised, because the
 namespace has no USB device; it is established by reading the source.
@@ -362,6 +357,41 @@ in a scratch copy by the version from before the endpoint identity, as
 described for the MAC cases. `endpoint-same-ip` and `endpoint-mixed` must
 fail `endpoint second port reads its device` with the second port reporting
 22.5, and the six other cases must pass.
+
+## Exit loop
+
+The driver stops and joins each port's poller thread in an exit handler, so
+the poller never calls into the vendor library after the process has begun to
+unload it. Before this, about two to three percent of the normal exits of
+`endpoint-same-ip` aborted with a pure virtual call; the race needs a poller
+that is inside a vendor call when the library destructor deletes the devices,
+so a single run does not show it. `tests/exit_loop.bash` runs one case many
+times, each run in its own network namespace so that parallel runs do not share
+the fixture addresses, and fails when any run ends with a nonzero status. It is
+started outside a namespace shell and needs the unprivileged `unshare` that the
+other cases use. Run it from the repository root with `BUILD` set as above:
+
+```bash
+export TEMPLATE="$PWD/measCompApp/Db/measCompTemperatureIn.template"
+export IOC="$BUILD/reconnect-ioc"
+export DBD="$BUILD/reconnect.dbd"
+bash "$PWD/tests/exit_loop.bash" endpoint-same-ip 150 3 "$IOC" "$DBD" "$TEMPLATE" "$BUILD/exit-loop"
+```
+
+The 150 runs take about nine minutes at three at a time. The script prints the
+number of each failed run, and the output directory keeps these files for every
+run N: `run-N.log` is the IOC console log, where an abort prints its message,
+`run-N.out` lists each assertion as one JSON line, `run-N.err` is the runner's
+error output, `run-N.log.json` is the full record and `run-N.status` is the
+runner's exit status.
+
+With 150 runs the original driver is expected to abort at least once with
+97 percent probability, and the fixed driver must report 150 passed. For the
+original-behavior control, make a scratch copy of the repository whose
+`measCompApp/src/drvMultiFunction.cpp` is the version from before the exit
+handler, as described for the MAC cases, build it with its own `BUILD`, and run
+the same commands from the root of the scratch copy. A clean result there does
+not prove the absence of the race, only a failing run proves its presence.
 
 ## Negative controls
 

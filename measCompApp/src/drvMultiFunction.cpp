@@ -19,6 +19,9 @@
 #include <iocsh.h>
 #include <dbAccess.h>
 #include <epicsThread.h>
+#include <epicsEvent.h>
+#include <epicsAtomic.h>
+#include <epicsExit.h>
 #include <epicsString.h>
 #include <epicsMath.h>
 
@@ -618,6 +621,7 @@ public:
   virtual void report(FILE *fp, int details);
   // These should be private but are called from C
   virtual void pollerThread(void);
+  void stopPoller(void);
 
 protected:
   // Model parameters
@@ -735,6 +739,11 @@ private:
   bool initialized_;
   bool connected_;
   bool enumCallbacksPending_;
+  // The poller is joinable and stopped by an exit handler, so it never runs while the process unloads the
+  // vendor library and destroys the global mutexes.
+  epicsThreadId pollerId_;
+  int pollerStop_;
+  epicsEvent pollerWake_;
   epicsUInt64 lastConnectAttempt_;
   int savedTCType_[MAX_SIGNALS];
   int savedOpenDetect_[MAX_SIGNALS];
@@ -831,6 +840,12 @@ static void pollerThreadC(void * pPvt)
 {
     MultiFunction *pMultiFunction = (MultiFunction *)pPvt;
     pMultiFunction->pollerThread();
+}
+
+static void pollerExitC(void * pPvt)
+{
+    MultiFunction *pMultiFunction = (MultiFunction *)pPvt;
+    pMultiFunction->stopPoller();
 }
 
 MultiFunction::MultiFunction(const char *portName, const char *uniqueID, int maxInputPoints, int maxOutputPoints)
@@ -1018,12 +1033,32 @@ MultiFunction::MultiFunction(const char *portName, const char *uniqueID, int max
   unlock();
 
   /* Start the thread to poll counters and digital inputs and do callbacks to
-   * device support */
-  epicsThreadCreate("MultiFunctionPoller",
-                    epicsThreadPriorityLow,
-                    epicsThreadGetStackSize(epicsThreadStackMedium),
-                    (EPICSTHREADFUNC)pollerThreadC,
-                    this);
+   * device support.  The thread is joinable and an exit handler stops and joins it. */
+  epicsThreadOpts pollerOpts = EPICS_THREAD_OPTS_INIT;
+  pollerOpts.priority = epicsThreadPriorityLow;
+  pollerOpts.stackSize = epicsThreadStackMedium;
+  pollerOpts.joinable = 1;
+  epicsAtomicSetIntT(&pollerStop_, 0);
+  pollerId_ = epicsThreadCreateOpt("MultiFunctionPoller",
+                                   (EPICSTHREADFUNC)pollerThreadC,
+                                   this,
+                                   &pollerOpts);
+  if (pollerId_) {
+    epicsAtExit(pollerExitC, this);
+  } else {
+    printf("%s: cannot create the poller thread for port %s\n", driverName, portName);
+  }
+}
+
+/* Stops the poller and waits until it has returned; runs from the IOC exit handlers, which execute before
+ * the vendor library releases its devices and the process destroys its global mutexes. */
+void MultiFunction::stopPoller()
+{
+  if (!pollerId_) return;
+  epicsAtomicSetIntT(&pollerStop_, 1);
+  pollerWake_.signal();
+  epicsThreadMustJoin(pollerId_);
+  pollerId_ = 0;
 }
 
 int MultiFunction::initializeDevice()
@@ -2854,7 +2889,7 @@ void MultiFunction::pollerThread()
   int lastPoint;
   int status=0, prevStatus=0;
 
-  while(1) {
+  while (!epicsAtomicGetIntT(&pollerStop_)) {
     lock();
     int enabled = 0, automatic = 0;
     pasynManager->isEnabled(portUser_, &enabled);
@@ -3156,7 +3191,8 @@ error:
     ULMutex.unlock();
     unlock();
     if (pollTime < 1.) pollTime = 1.;
-    epicsThreadSleep(pollTime/1000.);
+    // Waits for the poll period, or until the exit handler wakes the poller to stop it.
+    pollerWake_.wait(pollTime/1000.);
   }
 }
 

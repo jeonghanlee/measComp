@@ -776,7 +776,7 @@ sub exercise_mac_two {
         {first => $first->{errors}, second => $second->{errors}});
     print {$run->{input}} "QUIT\n" or die "IOC input write: $!\n";
     wait_exit($run, $EXIT_TIMEOUT) or die "IOC exit deadline exceeded\n";
-    check($run, 'mac IOC stops on request', $run->{ioc_exit} == 0, $run->{ioc_exit});
+    check($run, 'mac IOC exits normally', $run->{ioc_exit} == 0, $run->{ioc_exit});
     return;
 }
 
@@ -817,7 +817,7 @@ sub exercise_mac_known {
         {first => $first->{errors}, second => $second->{errors}});
     print {$run->{input}} "QUIT\n" or die "IOC input write: $!\n";
     wait_exit($run, $EXIT_TIMEOUT) or die "IOC exit deadline exceeded\n";
-    check($run, 'mac IOC stops on request', $run->{ioc_exit} == 0, $run->{ioc_exit});
+    check($run, 'mac IOC exits normally', $run->{ioc_exit} == 0, $run->{ioc_exit});
     return;
 }
 
@@ -912,8 +912,7 @@ sub exercise_endpoint {
         {first => $first->{errors}, second => $second ? $second->{errors} : []});
     print {$run->{input}} "QUIT\n" or die "IOC input write: $!\n";
     wait_exit($run, $EXIT_TIMEOUT) or die "IOC exit deadline exceeded\n";
-    check($run, $second ? 'endpoint IOC stops on request' : 'endpoint IOC exits normally',
-        $run->{ioc_exit} == 0, $run->{ioc_exit});
+    check($run, 'endpoint IOC exits normally', $run->{ioc_exit} == 0, $run->{ioc_exit});
     return;
 }
 
@@ -1291,9 +1290,9 @@ Enum cases compare all record enum states with public driver reads and model-spe
 
 Bounds cases check TC32 24-bit conversion metadata without valid voltage samples, or E-1608 16-bit raw samples through periodic and I/O Intr records. They check engineering-limit changes; E-1608 also checks two-sample averaging, manual SLOPE coefficients, transport recovery and missing-sample alarms. The external fixture supplies raw values; real ULDAQ, driver and device support produce the record values.
 
-MAC cases select each TC32 fixture by MAC address, so the real driver finds it through broadcast discovery. mac-tc32-offline observes the absent device for eleven seconds while the fixture records every broadcast discovery request, then makes it available and requires a valid reading within twelve seconds. The recorded requests must number two or three and be at least 3.9 seconds apart, the four-second minimum refresh interval less a tolerance. mac-tc32-online requires the startup discovery to be the only discovery request through an idle interval, an EOF reconnect, and periods with auto-connect disabled and with the port disabled while the device is absent. mac-two-ports runs a second port, selected by a lower-case MAC with hexadecimal letters and with a different temperature, whose device appears while the first port stays connected and must connect within eight seconds, which a skipped refresh would exceed; the first port must keep its single connection and value, must never go three seconds without a request from the moment it is healthy, and the inventory must list exactly two distinct MAC addresses. mac-known-absent takes the first device offline before the second device appears, then requires the inventory to keep both MAC addresses and the first port to reconnect from its inventory entry without another discovery request. The two-port cases end the IOC directly and check only that it stops on request, because with two ports the driver's exit handlers can destroy a port object while its poller thread still runs, which aborts some exits of the original driver as well.
+MAC cases select each TC32 fixture by MAC address, so the real driver finds it through broadcast discovery. mac-tc32-offline observes the absent device for eleven seconds while the fixture records every broadcast discovery request, then makes it available and requires a valid reading within twelve seconds. The recorded requests must number two or three and be at least 3.9 seconds apart, the four-second minimum refresh interval less a tolerance. mac-tc32-online requires the startup discovery to be the only discovery request through an idle interval, an EOF reconnect, and periods with auto-connect disabled and with the port disabled while the device is absent. mac-two-ports runs a second port, selected by a lower-case MAC with hexadecimal letters and with a different temperature, whose device appears while the first port stays connected and must connect within eight seconds, which a skipped refresh would exceed; the first port must keep its single connection and value, must never go three seconds without a request from the moment it is healthy, and the inventory must list exactly two distinct MAC addresses. mac-known-absent takes the first device offline before the second device appears, then requires the inventory to keep both MAC addresses and the first port to reconnect from its inventory entry without another discovery request.
 
-Endpoint cases select devices by IP address, discovery port, hostname or MAC and require every port to read its own device with a single connection per fixture. endpoint-same-ip runs two fixtures at one IP address on discovery ports 54211 and 54221; endpoint-mixed selects the first of them by MAC through broadcast discovery and the second by IP address and port 54221; endpoint-distinct-ip runs two fixtures at distinct addresses. endpoint-default-port selects a broadcast-discovered device with an explicit default port and requires one inventory entry; endpoint-alt-port runs one fixture on port 54221; endpoint-hostname selects one fixture by a name that the namespace resolves through a bind-mounted hosts file and requires the resolved address in the inventory; endpoint-hostname-port selects a fixture on port 54221 by that name and port. endpoint-wrong-port names a discovery port nobody listens on and requires the port to stay disconnected with an empty inventory. The two-port endpoint cases end the IOC directly like the two-port MAC cases.
+Endpoint cases select devices by IP address, discovery port, hostname or MAC and require every port to read its own device with a single connection per fixture. endpoint-same-ip runs two fixtures at one IP address on discovery ports 54211 and 54221; endpoint-mixed selects the first of them by MAC through broadcast discovery and the second by IP address and port 54221; endpoint-distinct-ip runs two fixtures at distinct addresses. endpoint-default-port selects a broadcast-discovered device with an explicit default port and requires one inventory entry; endpoint-alt-port runs one fixture on port 54221; endpoint-hostname selects one fixture by a name that the namespace resolves through a bind-mounted hosts file and requires the resolved address in the inventory; endpoint-hostname-port selects a fixture on port 54221 by that name and port. endpoint-wrong-port names a discovery port nobody listens on and requires the port to stay disconnected with an empty inventory.
 
 =back
 

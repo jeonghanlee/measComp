@@ -12,7 +12,7 @@ Remote milestone observed at: 2026-11-07T00:06:21Z; state: open; six closed issu
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/1`.
 Baseline commit: 3bdd4f24d820579f3f423c7be968baf2bb413950
 
-Next session entry point: Implement M8 (issue #8) from its accepted plan in `measCompApp/src/drvMultiFunction.cpp` and the two-port test cases; M1 through M7 are complete and landed on `origin/site`.
+Next session entry point: Land the M8 implementation (issue #8), then synchronize and close the issue and set M8 Complete; M1 through M7 are complete and landed on `origin/site`, and M9 in the Backlog awaits an owner decision.
 
 ## Scope
 
@@ -37,9 +37,9 @@ Existing failure observations below come from the linked issues at the baseline 
 | M5 | MAC device rediscovery | Milestone | Complete | No | | An initially absent MAC-selected device connects without disturbing existing ports; [detail](#m5---mac-device-rediscovery) |
 | M6 | Discovery endpoint identity | Milestone | Complete | No | | Devices sharing an IP but using different discovery ports remain independent; [detail](#m6---discovery-endpoint-identity) |
 | M7 | Identifier case and refresh diagnostics | Milestone | Complete | No | | A lower-case MAC connects and a failed refresh is reported once; [detail](#m7---identifier-case-and-refresh-diagnostics) |
-| M8 | Two-port IOC exit race | Carry-forward | Not started | Yes | | An IOC with two measComp ports exits normally on every request; [detail](#m8---two-port-ioc-exit-race) |
+| M8 | Two-port IOC exit race | Carry-forward | In progress | No | | An IOC with two measComp ports exits normally on every request; [detail](#m8---two-port-ioc-exit-race) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: seven Complete and one Not started. `Ready` records dependency readiness only; M8 has no dependency. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
+The row order follows issue numbers and imposes no execution dependency. Current status: seven Complete and one In progress. `Ready` records dependency readiness only; no row is Not started. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
 
 ### Assignment History
 
@@ -686,7 +686,7 @@ Observed State: not projected
 Origin: 3bdd4f2 / M8
 Identity History: none
 GitHub Issue: [#8](https://github.com/jeonghanlee/measComp/issues/8)
-Status: Not started
+Status: In progress
 
 ##### Summary
 
@@ -716,11 +716,11 @@ Out of scope: changing reconnection policy, discovery behavior, patching the ven
 
 Plan Status: accepted
 Plan Acceptance: 2026-11-07; accepted by the owner after the diagnosis of the abort on the unchanged driver, its stack and failure rate, and the vendor library's exit-time device release were read from the sources and the recorded runs.
-Implementation Authorization: 2026-11-07; implement and verify the accepted plan items 1 to 3.
+Implementation Authorization: 2026-11-07; implement and verify the accepted plan items 1 to 3. Amended 2026-11-07 during implementation: item 1 also makes the poll wait interruptible, and item 2 adds `tests/exit_loop.bash` as the counted exit loop.
 Superseded Plan Artifacts: none
 
-1. In `measCompApp/src/drvMultiFunction.cpp`, create the poller thread joinable with `epicsThreadCreateOpt()`, add a stop flag that `pollerThread()` checks each cycle outside the device lock, and register an `epicsAtExit()` handler when the port is constructed that sets the flag and joins the thread. Verified by T1.
-2. In `tests/reconnect_ioc.cpp`, remove the direct `_exit(0)` for two-port runs and correct the comment that blames port object destruction; in `tests/test_reconnect.pl`, assert a zero exit status for the two-port cases and add a counted exit loop mode for `endpoint-same-ip`. Verified by T1 and T2.
+1. In `measCompApp/src/drvMultiFunction.cpp`, create the poller thread joinable with `epicsThreadCreateOpt()`, add a stop flag that `pollerThread()` checks each cycle outside the device lock, and register an `epicsAtExit()` handler when the port is constructed that sets the flag, wakes the poller and joins the thread; the poller waits out its poll period on an `epicsEvent` that the handler signals, so the exit does not wait for the poll period. Verified by T1.
+2. In `tests/reconnect_ioc.cpp`, remove the direct `_exit(0)` for two-port runs and correct the comment that blames port object destruction; in `tests/test_reconnect.pl`, assert a zero exit status for the two-port cases and add `tests/exit_loop.bash`, which runs one case many times with each run in its own network namespace. Verified by T1 and T2.
 3. Correct the matching sentence in `tests/README.md` and document the loop. Verified by T3 reader check and T2.
 
 ##### Test Plan
@@ -735,13 +735,21 @@ Superseded Plan Artifacts: none
 
 | Label | Observed At | Environment | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| T1 | Not run | Common integration environment | Pending | none |
-| T2 | Not run | Common integration environment | Pending | none |
-| T3 | Not run | Repository documents | Pending | none |
+| T1 | 2026-11-07T10:01:01Z to 10:25:47Z (loops of the final run) | Debian 13; real IOC, Base 7.0.10, asyn 4.45.0, patched ULDAQ 1.2.2; two TC32 fixtures at one address; three runs at a time, each in its own network namespace | Pass: `endpoint-same-ip` in 150 normal exits ends with status 0 in all 150 runs on the fixed driver and in all 150 runs on the sanitizer build with no report, and no run prints `pthread_mutex_destroy failed`. The driver from before the change with the same final tests aborts with the pure virtual call in 3 of 150 runs and prints the mutex message in every run. | `work/m8-verify/r2/`: `loop-fixed.out`, `loop-asan.out`, `loop-base.out`, `build/exit-loop/`, `base-build/exit-loop/` |
+| T2 | 2026-11-07T09:54:58Z to 10:01:01Z (cases), Perl and ShellCheck at the end of the run | Same environment; Perl 5.40.1 and 5.26.3 | Pass with one recorded exception: the 14 earlier cases pass 989 assertions, the 4 MAC cases 35 and the 8 endpoint cases 45, every IOC exit 0, Perl checks on both versions and ShellCheck pass. In this run `bounds-e1608-online` failed its 0.25-second `polling stopped before no-sample check` once; 15 runs of each bounds case per driver afterwards show the same failure on the original driver (2 of 15 in the online case) and on the fixed driver (1 of 15 online, 2 of 15 offline), so it is a timing margin of that existing case and not a behavior of this change. A first full run of the same tree before the poll wait became interruptible failed four digital cases at their five-second exit deadline, because the exit handler waited for the ten-second poll sleep those cases configure; the digital cases pass in the final run and their duration equals the original driver's. | `work/m8-verify/r2/`, `work/m8-verify/flake/`, first run in `work/m8-verify/r1/` |
+| T3 | 2026-11-07 | Repository documents | Pass, read by the implementer without an independent reader: `tests/README.md` states that every case exits normally with status zero, describes the exit loop and its control, and no longer carries the claim about port object destruction; the `tests/reconnect_ioc.cpp` comment states that every case leaves through `epicsExit()`. | `tests/README.md`, `tests/reconnect_ioc.cpp` |
+
+Source identity of the final run: `drvMultiFunction.cpp` SHA-256 `d47397d11a34c6357f1610581a792112da2d61e9d26986eb7fdd294b988eb9e6`; `test_reconnect.pl` `ec89c78b92a6b22252520b18e7e45a0a37eb8171855c3e12c6499a92d65eef54`; `reconnect_ioc.cpp` `a7884dd5112869574ce4cd4e3f5944c3d530ed23bbd4dfd870652b7e2f615db4`; `exit_loop.bash` `5f4a0f6085a08021f94508424297302de8913745de940d53c2d59786f96f9826`; `build_reconnect.pl` `c9f049c2ba64934b717e0d27b49fcdd0941cfc472c1ef1da0bb993351478a400`. The 20 build input hashes of the full run were rechecked unchanged after execution. After that run the review removed one unused `#include <unistd.h>` from `reconnect_ioc.cpp`; the hash above is the final file, which was rebuilt and run on `endpoint-alt-port`, `endpoint-same-ip`, `mac-two-ports` and `digital-word` with every assertion passing and exit status 0, and the other hashes are unchanged. The original driver is the committed `ccf1a94` `drvMultiFunction.cpp` built with the final tests.
+
+The failure rate of the original driver was measured at about 2 to 3 percent of the normal exits of `endpoint-same-ip` in the diagnosis and at 2 percent in the final loop; the mac-two-ports case showed none in 60 exits. The fix needs Base 7.0.2 or later for joinable threads; the repository configures 7.0.9. The exit waits for a poller that is inside a vendor call: on `mac-known-absent`, where the poller is inside a rediscovery call, the exit is 1.2 to 1.4 seconds later than on the original driver (12.8 to 12.9 seconds against 11.5 to 11.7 over six runs), the other measured cases differ by less than 0.3 seconds, and a stalled vendor call delays it until that call returns.
+
+Limits: the single-port exit path was measured only in one loop of 60 normal exits of `endpoint-alt-port`, which passed, and not on the original driver. The race is probabilistic, so a clean loop on the original driver would not prove its absence.
 
 ##### Closure Evidence
 
-- Diagnosis observed 2026-11-07 on the unchanged driver with a normal-exit test IOC: 5 aborts in 210 normal exits of the two-port cases (`endpoint-same-ip` 2 of 90 on the plain build and 3 of 90 on the sanitizer build, `mac-two-ports` 0 of 60), every abort with the stack `pollerThreadC`, `pollerThread`, `disconnect`, `ulDisconnectDaqDevice`, pure virtual call, and the `pthread_mutex_destroy failed` message in every exit; the raw runs are local evidence under `work/m8-diag/`. No plan is accepted yet.
+- Review on 2026-11-07: one third-person pass and three second-person passes (register reader, operator of the exit loop, maintainer of the code). The third-person pass read the complete change, recounted the recorded diagnosis, ran a 60-exit single-port loop, the loop script's failure path and a duration comparison against the original driver; the passes found one wrong count, a stale entry point, one unmeasured exit delay, two unclear README passages and one unused include, all corrected, and the last pass returned no finding above the floor. A similar poller in `drvUSBCTR.cpp` is outside this unit and is registered in the Backlog.
+- Implementation and verification are recorded; commit, landing and issue closure remain pending. All required checks passed, with the recorded timing exception of an existing case, and none is waived.
+- Diagnosis observed 2026-11-07 on the unchanged driver with a normal-exit test IOC: 5 aborts in 240 normal exits of the two-port cases (`endpoint-same-ip` 2 of 90 on the plain build and 3 of 90 on the sanitizer build, `mac-two-ports` 0 of 60), every abort with the stack `pollerThreadC`, `pollerThread`, `disconnect`, `ulDisconnectDaqDevice`, pure virtual call, and the `pthread_mutex_destroy failed` message in every exit; the raw runs are local evidence under `work/m8-diag/`. No plan is accepted yet.
 
 ##### GitHub Projection
 
@@ -759,7 +767,66 @@ Last Compared: 2026-11-07T02:12:35Z; remote updated at 2026-11-07T02:12:35Z
 
 | ID | Work unit | Type | Status | Ready | Deps | Done when / Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
+| M9 | USB counter poller exit race | Carry-forward | Open | No | | `drvUSBCTR.cpp` stops its poller before the process exits, as the multifunction driver does; priority and scope are undecided; [detail](#m9---usb-counter-poller-exit-race) |
 
 ### Backlog Details
 
-None. All assigned work is in the Milestone section.
+#### M9 - USB Counter Poller Exit Race
+
+Origin: 3bdd4f2 / M9
+Identity History: none
+GitHub Issue: none
+Status: Open
+
+##### Summary
+
+`measCompApp/src/drvUSBCTR.cpp` starts a `USBCTRPoller` thread with `epicsThreadCreate()` and its loop runs in `while(1)` with no stop condition and no join, the pattern that makes a two-port multifunction IOC abort while exiting when the vendor library deletes its devices during `exit()`. The same exit race is therefore likely, but it was not reproduced: the file includes `drvMca.h` from the separate `mca` module, which is absent from the available build environment, so it could not be compiled or run here.
+
+##### Scope
+
+Decide whether the USB counter driver gets the same stop and join exit handler, and how it is built and verified without the missing module.
+
+Out of scope: the multifunction driver, which is fixed separately, and Windows.
+
+##### Completion Criteria
+
+- The owner decides the priority and the verification environment, and the row is then moved to Not started, Deferred or retired with a dated decision.
+
+##### Dependencies And Decisions
+
+- None recorded. Verification needs a build environment that provides the `mca` module headers.
+
+##### Implementation Plan
+
+Plan Status: draft
+Plan Acceptance: none
+Implementation Authorization: none
+Superseded Plan Artifacts: none
+
+1. Reproduce the exit abort on a build that includes the `mca` module, then apply the stop and join exit handler and rerun the same loop.
+
+##### Test Plan
+
+| Label | Layer | Method | Environment | Expected Result |
+| --- | --- | --- | --- | --- |
+| T1 | Integration | A counted loop of normal exits of an IOC that configures the USB counter driver. | An environment that provides the `mca` module and a counter device or protocol fixture | Every exit has status 0 and no sanitizer report; the unchanged driver aborts in some exits. |
+
+##### Verification Results
+
+| Label | Observed At | Environment | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| T1 | Not run | Environment with the `mca` module | Pending | none |
+
+##### Closure Evidence
+
+- Observed 2026-11-07 while reviewing the multifunction exit fix: `drvUSBCTR.cpp` lines 434 and 1499 show the thread creation and the unconditional loop. The build verification of this file was declined on 2026-11-06 and is recorded in `docs/CLOSED_DOORS.md`; this row concerns the exit pattern, not that build verification.
+
+##### GitHub Projection
+
+Title: none
+Labels: none
+GitHub Milestone: none
+Observed State: none
+Observed Labels: none
+Observed Milestone: none
+Last Compared: never

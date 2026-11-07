@@ -15,7 +15,6 @@
 #include <dbStaticLib.h>
 #include <dbScan.h>
 #include <epicsExit.h>
-#include <unistd.h>
 #include <iocInit.h>
 #include <initHooks.h>
 #include <measCompDiscover.h>
@@ -336,10 +335,7 @@ int main(int argc, char **argv)
         else if (!std::strncmp(command, "QUIT", 4)) break;
         else std::puts("UNKNOWN");
     }
-    // With two ports the driver's exit handlers can destroy a port object while its poller thread
-    // still runs, which aborts some exits of the original driver as well.  The two-port cases end the
-    // process directly; the single-port cases keep the normal exit through the exit handlers.
-    if (portB) _exit(0);
+    // Every case leaves through epicsExit() so the driver's exit handlers run, as in a production IOC.
     epicsExit(0);
     return 0;
 }
