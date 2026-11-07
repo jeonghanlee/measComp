@@ -8,19 +8,19 @@ Git upstream: origin/site
 Remote tracker: [jeonghanlee/measComp milestone 1](https://github.com/jeonghanlee/measComp/milestone/1)
 GitHub milestone: Connection recovery and device selection
 Due date: none
-Remote milestone observed at: 2026-11-06T19:16:41Z; state: open; five closed issues and one open issue
+Remote milestone observed at: 2026-11-07T00:06:21Z; state: open; six closed issues and no open issue
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/1`.
 Baseline commit: 3bdd4f24d820579f3f423c7be968baf2bb413950
 
-Next session entry point: Implement M6 (issue #7) from its accepted plan in `measCompApp/src/measCompDiscover.cpp` and the endpoint test cases; M1 through M5 and M7 are complete and landed on `origin/site`.
+Next session entry point: All seven work units are complete and landed on `origin/site`; the six linked issues are closed. The remaining action is closing the GitHub milestone, which this document does not perform.
 
 ## Scope
 
-This document assigns issues #2 through #7 to six work units, plus one follow-up work unit without an issue, for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. M1 through M5 are complete; M6 remains a draft plan.
+This document assigns issues #2 through #7 to six work units, plus one follow-up work unit without an issue, for the independently maintained `site` branch. It owns their scope, implementation plans, tests, verification results and closure evidence. GitHub retains the live issue metadata. All seven work units are complete.
 
 The common integration environment is Linux with the real measComp driver, EPICS Base 7.0.10, asyn 4.45 and patched ULDAQ 1.2.2. Extend the shipped Perl/Bash tests and retain `tests/reconnect_ioc.cpp`; use external device protocol fixtures, without replacing internal driver, asyn or ULDAQ functions. Record the source commit, dependency identities, assertions, fixture requests and native IOC exit status for each executed check. Checks reproducing a defect must fail for the intended assertion on the affected baseline and pass on the fixed code; setup and build failures do not establish a regression. Compatibility checks and positive controls must pass on both the baseline and fixed code. When a check combines these purposes, record the defect assertion separately from its controls.
 
-Existing failure observations below come from the linked issues at the baseline commit. They are not successful verification of a fix. M1 through M5 record observed post-fix verification, repository landing and linked-issue closure. M6 remains unimplemented. The analog metadata findings are separate from the normal floating-point TC32 temperature path. MAC rediscovery and same-IP/different-discovery-port selection retain their specific applicability conditions.
+Existing failure observations below come from the linked issues at the baseline commit. They are not successful verification of a fix. M1 through M7 record observed post-fix verification, repository landing and, where an issue is linked, its closure. The analog metadata findings are separate from the normal floating-point TC32 temperature path. MAC rediscovery and same-IP/different-discovery-port selection retain their specific applicability conditions.
 
 **Out of scope:** ULDAQ vendor patch development, upstream submissions, release numbering, tags, deployment, output-command replay, and a general qualification of Windows, USB, EXP-32 or hardware power cycling. Changes to `docs/reconnection.md` and `tests/README.md` belong to the affected work unit when behavior or test invocation changes. Existing test limitations remain explicit.
 
@@ -35,10 +35,10 @@ Existing failure observations below come from the linked issues at the baseline 
 | M3 | Analog enum initialization | Milestone | Complete | No | | Offline-start records obtain the same enums as online-start records; [detail](#m3---analog-enum-initialization) |
 | M4 | Analog conversion initialization | Milestone | Complete | No | | Offline-start conversion matches online-start conversion and measured raw values; [detail](#m4---analog-conversion-initialization) |
 | M5 | MAC device rediscovery | Milestone | Complete | No | | An initially absent MAC-selected device connects without disturbing existing ports; [detail](#m5---mac-device-rediscovery) |
-| M6 | Discovery endpoint identity | Milestone | In progress | No | | Devices sharing an IP but using different discovery ports remain independent; [detail](#m6---discovery-endpoint-identity) |
+| M6 | Discovery endpoint identity | Milestone | Complete | No | | Devices sharing an IP but using different discovery ports remain independent; [detail](#m6---discovery-endpoint-identity) |
 | M7 | Identifier case and refresh diagnostics | Milestone | Complete | No | | A lower-case MAC connects and a failed refresh is reported once; [detail](#m7---identifier-case-and-refresh-diagnostics) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: six Complete and one In progress. `Ready` records dependency readiness only; the remaining draft plan still requires acceptance and implementation authorization. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
+The row order follows issue numbers and imposes no execution dependency. Current status: seven Complete. `Ready` records dependency readiness only; no row is Not started. No external prerequisite is currently established. If a required hardware or third-party dependency is selected later, add an external-gate row and record the affected work before changing its status.
 
 ### Milestone Details
 
@@ -513,7 +513,7 @@ Recheck metadata with `gh issue view 6 --repo jeonghanlee/measComp --json state,
 Origin: 3bdd4f2 / M6
 Identity History: none
 GitHub Issue: [#7](https://github.com/jeonghanlee/measComp/issues/7)
-Status: In progress
+Status: Complete
 
 ##### Summary
 
@@ -584,7 +584,9 @@ Limits: the reuse of an inventory entry for a device whose MAC is already known 
 
 ##### Closure Evidence
 
-- Local implementation and verification are recorded; commit, landing and issue closure remain pending. All required checks passed and none is waived.
+- The endpoint identity, the inventory reuse by MAC, the eight endpoint cases and the documentation are implemented and verified in 8805d00710721318c50695950e23f22cd1e0c6bf. The commit contains the reviewed seven-file selection and its `Refs #7` footer does not close the issue. All required checks passed and none is waived.
+- Remote landing observed at 2026-11-06T23:20:08Z and again at 2026-11-07T00:06:19Z: after fetching origin, local HEAD and origin/site both resolved to 8805d00710721318c50695950e23f22cd1e0c6bf, their full-tree comparison produced no differences, their ahead/behind counts were zero, the working tree was clean, and the GitHub branch API returned the same commit. Recheck with `git -C /data/gitsrc/measComp fetch origin`, `git -C /data/gitsrc/measComp rev-parse HEAD origin/site` and `git -C /data/gitsrc/measComp diff HEAD origin/site`.
+- Issue #7 was closed as completed at 2026-11-06T23:57:55Z, observed at 2026-11-07T00:06:20Z. Its body matches the prepared implementation and verification record, with all six acceptance criteria checked. The completion comment references 8805d00710721318c50695950e23f22cd1e0c6bf. Required verification, repository landing and linked-issue closure are complete; no check or external condition is waived.
 - Review: three third-person passes on the plan before implementation, and one third-person pass on the implementation in the author's stance on 2026-11-06 that read the complete change, confirmed every inventory append records a port, repeated the two-port cases five times each and exercised a host name with a port and an unused port; it returned no finding above the floor and one observation that the owner directed to be applied as the two added cases.
 - Evidence: `work/m6-endpoint/` retains the builds with command and input hashes, every case's stdout, stderr, JSON and native runner status, the controls and the sanitizer run. These are local evidence paths; reproduce with the shipped builder and the cases in `tests/README.md`.
 
@@ -593,10 +595,10 @@ Limits: the reuse of an inventory entry for a device whose MAC is already known 
 Title: Include discovery port in the device cache identity
 Labels: bug
 GitHub Milestone: Connection recovery and device selection
-Observed State: open
+Observed State: closed (completed)
 Observed Labels: bug
 Observed Milestone: Connection recovery and device selection (milestone 1)
-Last Compared: 2026-11-06T21:27:12Z; remote updated at 2026-11-05T18:05:33Z
+Last Compared: 2026-11-07T00:06:20Z; remote updated at 2026-11-06T23:57:55Z
 
 Recheck metadata with `gh issue view 7 --repo jeonghanlee/measComp --json state,labels,milestone,updatedAt`.
 
