@@ -12,7 +12,7 @@ Remote milestone observed at: 2026-11-07T17:39:15Z; state: open; six closed issu
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/1`.
 Baseline commit: 3bdd4f24d820579f3f423c7be968baf2bb413950
 
-Next session entry point: All eight work units are complete and landed on `origin/site`; the six milestone issues and issue #8 are closed. Backlog M9 (USB counter poller exit race) awaits an owner decision, and closing the GitHub milestone is the owner's step, which this document does not perform.
+Next session entry point: All eight work units are complete and landed on `origin/site`; the six milestone issues and issue #8 are closed. Backlog M9 (USB counter poller exit race) awaits an owner decision, and Backlog M10 and M11 (issues #9 and #10) wait for G1, a USB board whose model is not yet known. Closing the GitHub milestone is the owner's step, which this document does not perform.
 
 ## Scope
 
@@ -770,6 +770,9 @@ Last Compared: 2026-11-07T17:39:14Z; remote updated at 2026-11-07T17:38:34Z
 | ID | Work unit | Type | Status | Ready | Deps | Done when / Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | M9 | USB counter poller exit race | Carry-forward | Open | No | | `drvUSBCTR.cpp` stops its poller before the process exits, as the multifunction driver does; priority and scope are undecided; [detail](#m9---usb-counter-poller-exit-race) |
+| M10 | Generator transport-error handling | Carry-forward | Blocked | No | G1 | A transport error in a generator write disconnects the port and the first error code is kept; the network temperature devices are unchanged; [detail](#m10---generator-transport-error-handling) |
+| M11 | Open-detect result on input type change | Carry-forward | Blocked | No | G1 | A connection error from the open-detect call in the input-type branch disconnects the port; [detail](#m11---open-detect-result-on-input-type-change) |
+| G1 | USB board for hardware verification | External gate | Open | No | | A USB board that exercises M10 or M11 is available and its model is recorded; [detail](#g1---usb-board-for-hardware-verification) |
 
 ### Backlog Details
 
@@ -832,3 +835,161 @@ Observed State: none
 Observed Labels: none
 Observed Milestone: none
 Last Compared: never
+
+#### M10 - Generator Transport Error Handling
+
+Origin: 3bdd4f2 / M10
+Identity History: none
+GitHub Issue: [#9](https://github.com/jeonghanlee/measComp/issues/9)
+Status: Blocked (prior status: Not started)
+
+##### Summary
+
+`writeFloat64()` restarts a running pulse generator or waveform generator with vendor calls and returns `asynError` on a failure without disconnecting the port, unlike `writeInt32()` and `writeUInt32Digital()`. The stop and restart pairs at five sites accumulate their status with a bitwise OR, and 12 of the 21 pairs of different connection-error codes combine into a code that `isConnectionError()` rejects. Found by reading the code on 2026-11-07 and not reproduced. The paths run on the USB boards with a pulse generator (USB-1608G, USB-1608HS-2AO, USB-1808) or an analog output scan, and the digitizer restart also on the network E-1608; the network temperature devices TC32 and E-TC reach none of them.
+
+##### Scope
+
+Add the connection-error disconnect to `writeFloat64()` and keep the first non-zero error code at the five OR sites.
+
+Out of scope: the pulse generator running state in `disconnect()`, whose handling depends on how the vendor library leaves a running timer after a transport loss, the reconnection policy, discovery and the poller.
+
+##### Completion Criteria
+
+- A transport error from a generator stop or restart in `writeFloat64()` disconnects the port and marks the inputs disconnected.
+- Different connection-error codes from the stop and the restart still disconnect the port at all five sites.
+- The shipped cases, including the network temperature device cases, pass unchanged.
+- A hardware check on a USB board with a pulse generator or waveform generator records the disconnect, with the board model and library version.
+- The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
+
+##### Dependencies And Decisions
+
+- G1: the hardware check needs a USB board; the regression checks do not.
+- Decision Date: 2026-11-08. The owner decided to fix both this item and M11 and to keep them in the Backlog for now; the USB board is not known to exist.
+
+##### Implementation Plan
+
+Plan Status: draft
+Plan Acceptance: none
+Implementation Authorization: none
+Superseded Plan Artifacts: none
+
+1. In `measCompApp/src/drvMultiFunction.cpp`, replace the OR accumulation at the five sites by a first-error accumulation and add the `isConnectionError()` and `disconnect()` step to `writeFloat64()` after the vendor mutex is released. Verified by T1 and T2.
+
+##### Test Plan
+
+| Label | Layer | Method | Environment | Expected Result |
+| --- | --- | --- | --- | --- |
+| T1 | Regression | Run the 18 shipped cases and the 8 endpoint cases, the Perl checks on Debian 13 and Rocky 8 and the compile of the changed C++ files on Rocky 8; the cases that use the TC32 and E-TC protocol fixtures are the guard for the network temperature devices. | Common integration environment; Rocky 8 image | All pass with normal IOC exit; the changed files compile on Rocky 8. |
+| T2 | Hardware | Unplug a USB board with a pulse generator or waveform generator while a generator parameter changes and read the port state and log. | A USB board that has the feature (G1) | The port is disconnected and the inputs are marked disconnected. |
+
+##### Verification Results
+
+| Label | Observed At | Environment | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| T1 | Not run | Common integration environment | Pending | none |
+| T2 | Not run | USB board (G1) | Pending | none |
+
+##### Closure Evidence
+
+- Found 2026-11-07 during a coherence review of the completed work units, confirmed by reading the code and by computing the error-code combinations from `uldaq.h`; not reproduced. No plan is accepted yet.
+
+##### GitHub Projection
+
+Title: Disconnect on transport errors when generator settings change and keep the first error code
+Labels: bug
+GitHub Milestone: none
+Observed State: open
+Observed Labels: bug
+Observed Milestone: none
+Last Compared: 2026-11-08T02:31:58Z; remote updated at 2026-11-08T02:31:48Z
+
+#### M11 - Open Detect Result On Input Type Change
+
+Origin: 3bdd4f2 / M11
+Identity History: none
+GitHub Issue: [#10](https://github.com/jeonghanlee/measComp/issues/10)
+Status: Blocked (prior status: Not started)
+
+##### Summary
+
+When the analog input type changes to thermocouple, `writeInt32()` calls `setOpenThermocoupleDetect()` and drops its return value, while the other callers keep it, so a transport error in that call leaves the port connected and the write reporting success. The call is from the original upstream code and its siblings were changed when the thermocouple settings were made consistent after a reconnect. Found by reading the code on 2026-11-07 and not reproduced. The branch runs only on the USB-2408-2AO, the one board with a configurable input type; the network temperature devices TC32 and E-TC never run it.
+
+##### Scope
+
+Store the result of the open-detect call in the status that the end of `writeInt32()` classifies, keeping the first non-zero error code.
+
+Out of scope: other boards, the restore of the thermocouple settings after a reconnect and the reconnection policy.
+
+##### Completion Criteria
+
+- A connection error from the open-detect call in the input-type branch disconnects the port and `writeInt32()` returns `asynError`.
+- A non-transport error from that call returns `asynError` without disconnecting a healthy device.
+- The shipped cases, including the network temperature device cases, pass unchanged.
+- A hardware check on a USB-2408-2AO records the disconnect when the board is unplugged during the input type switch, with the board model and library version.
+- The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
+
+##### Dependencies And Decisions
+
+- G1: the hardware check needs a USB-2408-2AO; the regression checks do not.
+- Decision Date: 2026-11-08. The owner decided to fix both this item and M10 and to keep them in the Backlog for now; the USB board is not known to exist.
+
+##### Implementation Plan
+
+Plan Status: draft
+Plan Acceptance: none
+Implementation Authorization: none
+Superseded Plan Artifacts: none
+
+1. In `measCompApp/src/drvMultiFunction.cpp`, assign the result of the open-detect call in the input-type branch of `writeInt32()` to the status, keeping the first non-zero error code. Verified by T1 and T2.
+
+##### Test Plan
+
+| Label | Layer | Method | Environment | Expected Result |
+| --- | --- | --- | --- | --- |
+| T1 | Regression | Run the 18 shipped cases and the 8 endpoint cases, the Perl checks on Debian 13 and Rocky 8 and the compile of the changed C++ files on Rocky 8; the cases that use the TC32 and E-TC protocol fixtures are the guard for the network temperature devices. | Common integration environment; Rocky 8 image | All pass with normal IOC exit; the changed file compiles on Rocky 8. |
+| T2 | Hardware | Unplug a USB-2408-2AO while the input type switches from voltage to thermocouple and read the port state and log. | A USB-2408-2AO (G1) | The port is disconnected and the write returns `asynError`. |
+
+##### Verification Results
+
+| Label | Observed At | Environment | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| T1 | Not run | Common integration environment | Pending | none |
+| T2 | Not run | USB-2408-2AO (G1) | Pending | none |
+
+##### Closure Evidence
+
+- Found 2026-11-07 during a coherence review of the completed work units, confirmed by reading the code and the commit history of the call sites; not reproduced. No plan is accepted yet.
+
+##### GitHub Projection
+
+Title: Check the open thermocouple detection result when the analog input type changes
+Labels: bug
+GitHub Milestone: none
+Observed State: open
+Observed Labels: bug
+Observed Milestone: none
+Last Compared: 2026-11-08T02:31:58Z; remote updated at 2026-11-08T02:31:50Z
+
+#### G1 - USB Board For Hardware Verification
+
+Origin: 3bdd4f2 / G1
+GitHub Issue: none
+Status: Open
+
+##### Summary
+
+M10 and M11 need a hardware check on a USB board: M10 on a board with a pulse generator (USB-1608G, USB-1608HS-2AO or USB-1808) or a waveform generator, M11 on a USB-2408-2AO. The owner has not confirmed that a USB board exists or which model it is. The responsible party is the owner; the affected work is M10 and M11. The regression checks of both do not depend on this gate.
+
+##### Completion Criteria
+
+- The owner confirms a USB board and its model, and the model is one of the boards that exercise M10 or M11, or the owner decides to waive the hardware check with a dated decision.
+
+##### Verification Results
+
+| Observed At | Result | Evidence |
+| --- | --- | --- |
+| 2026-11-08 | Pending | The owner does not know the model or whether the board exists. |
+
+##### Closure Evidence
+
+- none
