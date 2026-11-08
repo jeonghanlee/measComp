@@ -387,7 +387,8 @@ For the original-behavior control, build a scratch copy whose
 `measCompApp/src/drvMultiFunction.cpp` is the version from before the spaced
 retries, as described for the MAC cases, and run the same command from its
 root. It must fail `silent healthy port keeps polling`, because a five-second
-retry of a silent device blocks the healthy port more than half of the time.
+retry of a silent device leaves the healthy port 70 to 74 percent of the
+control's requests in the measured window, below the 80 percent threshold.
 
 ## Exit loop
 

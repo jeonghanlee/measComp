@@ -151,7 +151,8 @@ A network device that stops answering without closing its connection, as one
 that loses power does, makes each connection attempt wait for the vendor
 library's timeouts, about three seconds, and all other ports of the IOC wait
 for the lock in the meantime. With a five-second retry the healthy ports were
-blocked more than half of the time.
+blocked for about 30 percent of the time in steady state, and for about half of
+it in the first 20 seconds after the device went silent.
 
 The first three consecutive failed attempts of a port keep the five-second
 interval, so an outage of a few seconds recovers as quickly as before. From
