@@ -29,6 +29,14 @@
 
 #define DRIVER_VERSION "4.4"
 #define RECONNECT_DELAY 5.0
+// A failed connection attempt holds the process-wide vendor mutex for its whole duration.  The first
+// RECONNECT_FAST_ATTEMPTS consecutive failures keep the RECONNECT_DELAY interval, so a short outage
+// recovers as quickly as before; after that the next attempt waits RECONNECT_DURATION_FACTOR times
+// as long as the failed one, at least RECONNECT_DELAY and at most RECONNECT_MAX_DELAY seconds, so a
+// device that stays silent blocks the other ports for at most about a tenth of the time.
+#define RECONNECT_FAST_ATTEMPTS 3
+#define RECONNECT_DURATION_FACTOR 10.0
+#define RECONNECT_MAX_DELAY 60.0
 
 #ifdef _WIN32
   #include "cbw.h"
@@ -745,6 +753,9 @@ private:
   int pollerStop_;
   epicsEvent pollerWake_;
   epicsUInt64 lastConnectAttempt_;
+  double reconnectDelay_;
+  int failedConnectAttempts_;
+  bool connectAllowed_;
   int savedTCType_[MAX_SIGNALS];
   int savedOpenDetect_[MAX_SIGNALS];
   int initializeDevice();
@@ -872,6 +883,9 @@ MultiFunction::MultiFunction(const char *portName, const char *uniqueID, int max
   connected_ = false;
   enumCallbacksPending_ = false;
   lastConnectAttempt_ = 0;
+  reconnectDelay_ = RECONNECT_DELAY;
+  failedConnectAttempts_ = 0;
+  connectAllowed_ = false;
   boardType_ = boardFamily_ = 0;
   boardName_[0] = '\0';
   pBoardEnums_ = 0;
@@ -1458,10 +1472,12 @@ asynStatus MultiFunction::connect(asynUser *pasynUser)
 {
   if (!connected_) {
     epicsUInt64 now = epicsMonotonicGet();
-    if (lastConnectAttempt_ && (now-lastConnectAttempt_)/1.e9 < RECONNECT_DELAY)
+    if (lastConnectAttempt_ && (now-lastConnectAttempt_)/1.e9 < reconnectDelay_)
       return asynDisconnected;
     lastConnectAttempt_ = now;
     ULMutex.lock();
+    // The attempt is timed from when the mutex is held, so waiting for another port is not counted.
+    epicsUInt64 attemptStart = epicsMonotonicGet();
     int status;
     if (!initialized_) {
       status = initializeDevice();
@@ -1486,12 +1502,22 @@ asynStatus MultiFunction::connect(asynUser *pasynUser)
           }
         }
       #endif
+      double attempt = (epicsMonotonicGet() - attemptStart)/1.e9;
+      failedConnectAttempts_++;
+      reconnectDelay_ = RECONNECT_DELAY;
+      if (failedConnectAttempts_ >= RECONNECT_FAST_ATTEMPTS) {
+        reconnectDelay_ = RECONNECT_DURATION_FACTOR * attempt;
+        if (reconnectDelay_ < RECONNECT_DELAY) reconnectDelay_ = RECONNECT_DELAY;
+        if (reconnectDelay_ > RECONNECT_MAX_DELAY) reconnectDelay_ = RECONNECT_MAX_DELAY;
+      }
       ULMutex.unlock();
       reportError(status, "connect", "Device connection failed");
       setInputStatus(asynDisconnected);
       return asynDisconnected;
     }
     connected_ = true;
+    reconnectDelay_ = RECONNECT_DELAY;
+    failedConnectAttempts_ = 0;
     enumCallbacksPending_ = true;
     for (int i=0; i<MAX_IO_PORTS; i++) forceCallback_[i] = 1;
     ULMutex.unlock();
@@ -2894,7 +2920,15 @@ void MultiFunction::pollerThread()
     int enabled = 0, automatic = 0;
     pasynManager->isEnabled(portUser_, &enabled);
     pasynManager->isAutoConnect(portUser_, &automatic);
-    if (!connected_ && enabled && automatic) connect(portUser_);
+    // Enabling the port or auto-connect again asks for a prompt retry, so the spaced interval of a
+    // long outage starts over.
+    bool connectAllowed = enabled && automatic;
+    if (connectAllowed && !connectAllowed_) {
+      failedConnectAttempts_ = 0;
+      reconnectDelay_ = RECONNECT_DELAY;
+    }
+    connectAllowed_ = connectAllowed;
+    if (!connected_ && connectAllowed) connect(portUser_);
     if (!connected_ || !enabled) {
       for (i=0; i<MAX_SIGNALS; i++) callParamCallbacks(i);
       unlock();

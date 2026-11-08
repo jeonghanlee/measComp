@@ -12,7 +12,7 @@ Remote milestone observed at: 2026-11-08T05:09:19Z; state: open; five open issue
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/2`.
 Baseline commit: 9c39e491e463fac77f15cfcec16aa8b4a97cbf10
 
-Next session entry point: Implement M1 (issue #11) from its accepted plan in `measCompApp/src/drvMultiFunction.cpp` and the silent-device test cases. Issues #11 to #15 are assigned to GitHub milestone 2.
+Next session entry point: Finish the review of the M1 (issue #11) implementation, record M1 / T3, and commit the implementation; then close issue #11 and mark M1 Complete. Issues #11 to #15 are assigned to GitHub milestone 2.
 
 ## Scope
 
@@ -28,13 +28,13 @@ The common integration environment is Linux with the real measComp driver, EPICS
 
 | ID | Work unit | Type | Status | Ready | Deps | Done when / Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| M1 | Silent device stalls other ports | Carry-forward | Not started | Yes | | A healthy port keeps polling beside a silent network device; issue #11; [detail](#m1---silent-device-stalls-other-ports) |
+| M1 | Silent device stalls other ports | Carry-forward | In progress | No | | A healthy port keeps polling beside a silent network device; issue #11; [detail](#m1---silent-device-stalls-other-ports) |
 | M2 | Persistent read error logging | Carry-forward | Not started | Yes | | A persistent thermocouple read error is reported once per change; issue #12; [detail](#m2---persistent-read-error-logging) |
 | M3 | Single-request thermocouple read and acquisition time | Carry-forward | Not started | Yes | | One temperature request per scale group per poll with one acquisition timestamp; issue #13; [detail](#m3---single-request-thermocouple-read-and-acquisition-time) |
 | M4 | Thermocouple device diagnostics | Carry-forward | Not started | Yes | | Cold-junction temperatures, mains rejection and calibration information are exposed; issue #14; [detail](#m4---thermocouple-device-diagnostics) |
 | M5 | Temperature filter on Linux | Carry-forward | Not started | Yes | | The temperature filter takes effect on Linux; issue #15; [detail](#m5---temperature-filter-on-linux) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: five Not started. `Ready` records dependency readiness only. No external prerequisite is established for these rows.
+The row order follows issue numbers and imposes no execution dependency. Current status: one In progress and four Not started. `Ready` records dependency readiness only. No external prerequisite is established for these rows.
 
 ### Milestone Details
 
@@ -43,7 +43,7 @@ The row order follows issue numbers and imposes no execution dependency. Current
 Origin: 9c39e49 / M1
 Identity History: none
 GitHub Issue: [#11](https://github.com/jeonghanlee/measComp/issues/11)
-Status: Not started
+Status: In progress
 
 ##### Summary
 
@@ -51,16 +51,17 @@ A network device that stops answering without closing its connection stalls the 
 
 ##### Scope
 
-Space the reconnection attempts of a port by the time its failed attempts take, so a device whose attempts time out cannot hold the process-wide mutex for more than a tenth of the time. Narrowing the mutex per device is not part of this unit.
+Space the reconnection attempts of a port by the time its failed attempts take once three consecutive attempts have failed, so a device that stays silent cannot hold the process-wide mutex for more than about a tenth of the time, while a short outage recovers with the existing 5-second retry. Narrowing the mutex per device is not part of this unit.
 
-Out of scope: Changing the vendor timeouts, which jeonghanlee/uldaq-env#3 covers, splitting the process-wide mutex per device, the broadcast discovery wait, and the first stall of about six seconds when a connected device goes silent, which one read timeout and one connection timeout cause.
+Out of scope: Changing the vendor timeouts, which jeonghanlee/uldaq-env#3 covers, splitting the process-wide mutex per device, the broadcast discovery wait, and the stalls during the first three attempts of an outage, about 15 seconds, which keep today's behavior.
 
 ##### Completion Criteria
 
 - A shipped case runs a healthy TC32 port beside a second TC32 device that is dropped after it has connected, with a healthy-second-device control in the same case set.
-- Once the retry interval has grown, beginning 12 seconds after the device goes silent, the healthy port's request count over a 40-second window is at least 80 percent of the control's, and no pause in that window is longer than 3.5 seconds.
-- The retry interval after a failed attempt is the larger of 5 seconds and 10 times the attempt's duration, capped at 60 seconds, and returns to 5 seconds after a successful connection; an attempt that fails at once keeps the 5-second interval.
+- Beginning 25 seconds after the device goes silent, when the retry interval has grown, the healthy port's request count over a 40-second window is at least 80 percent of the control's, and no pause in that window is longer than 4 seconds.
+- The first three consecutive failed attempts are each followed by the 5-second interval; after the third and later failures the interval is the larger of 5 seconds and 10 times that attempt's duration, capped at 60 seconds, and a successful connection resets both the interval and the count.
 - The silent port is reported disconnected while the device is silent and reconnects with its own value within the capped interval after the device answers again.
+- After a second outage long enough for the interval to be spaced, disabling and enabling the silent port again reconnects it within 12 seconds of the device answering.
 - The existing cases pass unchanged.
 - The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
 ##### Dependencies And Decisions
@@ -68,14 +69,15 @@ Out of scope: Changing the vendor timeouts, which jeonghanlee/uldaq-env#3 covers
 - None. No work or external gate must complete first.
 - Decision Date: 2026-11-08. The owner assigned this work to the Network thermocouple acquisition milestone, GitHub milestone 2.
 - Decision Date: 2026-11-08. The owner chose to space the retry attempts by their duration and not to split the process-wide mutex per device: the vendor library keeps its device registry in a `std::map` without a lock, so concurrent calls on different devices would need a readers-writer lock and a thread-sanitizer check, and the mutex narrowing is revisited only if the spaced retries prove insufficient. The multiplier of 10 and the cap of 60 seconds are accepted with the plan.
+- Decision Date: 2026-11-08. The spacing starts only after three consecutive failed attempts. An attempt to reconnect to an offline device does not fail at once: the vendor connection includes a discovery query and its timeouts, and in the shipped offline fixture an attempt took about 4 to 5 seconds. Spacing from the first failure therefore delayed every reconnection to 30 to 60 seconds and broke the 12-second recovery of the existing `reconnect` and `mac-known-absent` cases, observed on 2026-11-08 with 46 seconds between two attempts. Three attempts at the existing interval keep the recovery of a short outage unchanged.
 ##### Implementation Plan
 
 Plan Status: accepted
-Plan Acceptance: 2026-11-08; accepted by the owner after the like-for-like measurement of the stall, the vendor library's unlocked device registry and the choice between spacing the retries and splitting the mutex were reviewed.
-Implementation Authorization: 2026-11-08; implement and verify the accepted plan items 1 to 3.
-Superseded Plan Artifacts: none
+Plan Acceptance: 2026-11-08; accepted by the owner after the first implementation, which spaced every retry from the first failure, was observed to break the recovery of the existing cases and the three-failure rule was proposed in its place.
+Implementation Authorization: 2026-11-08; implement and verify the accepted plan items 1 to 3. Amended 2026-11-08 at the owner's direction after the first implementation review: enabling the port or auto-connect again resets the interval and the count, and the silent-device case covers it with a second outage and a test IOC command that enables the second port.
+Superseded Plan Artifacts: the plan accepted on 2026-11-08 that spaced every retry from the first failed attempt, superseded the same day after it broke the recovery of the existing cases; its acceptance and authorization no longer apply.
 
-1. In `measCompApp/src/drvMultiFunction.cpp`, measure the duration of each vendor connection attempt inside `connect()` after the process-wide mutex is held, so the wait for the mutex is not counted, and keep a per-port retry interval that the reconnect gate uses in place of the fixed `RECONNECT_DELAY`: after a failed attempt the interval is the larger of `RECONNECT_DELAY` and 10 times the duration, capped at 60 seconds, and a successful attempt resets it. The inventory refresh interval stays below the 5-second minimum, as the MAC rediscovery design requires. Verified by T1 and T2.
+1. In `measCompApp/src/drvMultiFunction.cpp`, measure the duration of each vendor connection attempt inside `connect()` after the process-wide mutex is held, so the wait for the mutex is not counted, count consecutive failed attempts, and keep a per-port retry interval that the reconnect gate uses in place of the fixed `RECONNECT_DELAY`: after the first and second consecutive failures the interval stays `RECONNECT_DELAY`, after the third and later failures it is the larger of `RECONNECT_DELAY` and 10 times that attempt's duration, capped at 60 seconds, and a successful attempt resets the interval and the count. The inventory refresh interval stays below the 5-second minimum, as the MAC rediscovery design requires. Verified by T1 and T2.
 2. In `tests/test_reconnect.pl`, add a case where the second device is removed from the network after it has connected, with a control case where it stays healthy, and measure the healthy port's request count and longest pause from the fixture traffic. Verified by T1.
 3. In `docs/reconnection.md` and `tests/README.md`, describe the adaptive retry interval and the new cases. Verified by T3.
 
@@ -83,21 +85,26 @@ Superseded Plan Artifacts: none
 
 | Label | Layer | Method | Environment | Expected Result |
 | --- | --- | --- | --- | --- |
-| T1 | Integration | Run the new silent-device case and its healthy control, three runs each, and compare the healthy port's requests and longest pause over the window that begins 12 seconds after the device goes silent; then make the device answer again and wait for the silent port. | Common integration environment; two TC32 fixtures, the second one removed from the network | Request count at least 80 percent of the control, no pause longer than 3.5 seconds, the silent port reconnects within the capped interval; the unchanged driver fails the request and pause assertions. |
-| T2 | Regression | Run the 18 shipped cases, the 8 endpoint cases and the exit loop, the Perl checks on Debian 13 and Rocky 8 and the compile of the changed C++ files on Rocky 8. | Same environment; Perl 5.40.1 and 5.26.3 | All pass with normal IOC exit; cases that fail at once keep the 5-second retry. |
+| T1 | Integration | Run the new silent-device case and its healthy control, three runs each, and compare the healthy port's requests and longest pause over the 40-second window that begins 25 seconds after the device goes silent; then make the device answer again and wait for the silent port; after a second spaced outage, disable and enable the silent port and wait for it again. Build the two negative controls of `tests/README.md` once each. | Common integration environment; two TC32 fixtures, the second one removed from the network | Request count at least 80 percent of the control, no pause longer than 4 seconds, the silent port reconnects within the capped interval and within 12 seconds after it is enabled again; the unchanged driver and the unspaced-retry control fail the request assertion, and the control that keeps the spacing on enable fails the enable assertion. |
+| T2 | Regression | Run the 18 shipped cases, the 8 endpoint cases and the exit loop, the Perl checks on Debian 13 and Rocky 8 and the compile of the changed C++ files on Rocky 8. | Same environment; Perl 5.40.1 and 5.26.3 | All pass with normal IOC exit and their recovery deadlines unchanged. |
 | T3 | Review | Read the changed `docs/reconnection.md` and `tests/README.md` as the operator who sets up the case. | Repository documents | The retry interval, its cap and the remaining first stall are described. |
 
 ##### Verification Results
 
 | Label | Observed At | Environment | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| T1 | Not run | Common integration environment | Pending | none |
-| T2 | Not run | Common integration environment | Pending | none |
-| T3 | Not run | Repository documents | Pending | none |
+| T1 | 2026-11-08T07:35:35Z to 07:56:13Z | Debian 13; real IOC, Base 7.0.10, asyn 4.45.0, patched ULDAQ 1.2.2; two TC32 fixtures, the second one's address removed from the namespace after it connected | Pass: `silent-device` in four runs on the fixed driver (the README command and three more) passes its 8 assertions and gives 1.72 to 1.78 times the control's requests in the window that begins 25 seconds after the removal, a longest pause of 3.05 to 3.18 seconds; the second port reconnects with 37.25 within 16.9 to 17.5 seconds of the address returning, and within 2.1 to 2.6 seconds after it is enabled again following the second outage. The driver before this change, with the same tests, fails `silent healthy port keeps polling` in all three runs with 0.70 to 0.74 of the control's requests. The `silent-retry-unspaced` control fails the same assertion with 0.70; the `silent-enable-keeps-spacing` control passes the polling assertion with 1.72 and fails `silent second port reconnects promptly after it is enabled again` after 12.3 seconds. | `work/m1-silent/r2/`: `block6.out`, `silent-fixed-*`, `silent-base-*`, `mut-*-run` |
+| T2 | 2026-11-08T07:29:30Z to 08:05:48Z | Same environment; Perl 5.40.1 and 5.26.3; Rocky 8 image | Pass: the 14 earlier cases pass 995 assertions, the 4 MAC cases 35 and the 8 endpoint cases 45 with their recovery deadlines unchanged and every IOC exit 0; the exit loop passes 150 of 150; the Perl checks pass on both versions; `drvMultiFunction.cpp` and `tests/reconnect_ioc.cpp` compile on Rocky 8 without error. | `work/m1-silent/r2/` |
+| T3 | 2026-11-08 | Repository documents in the working tree of this verification | Pass: `docs/reconnection.md` describes the three five-second attempts, the spacing by ten times the attempt duration, the 60-second cap, the reset on enabling the port or auto-connect again and how long the port must stay disabled, and the remaining stalls that need ULDAQ changes; `tests/README.md` gives the silent-device command, its duration, its original-behavior control and two negative controls. | `docs/reconnection.md` section Silent devices; `tests/README.md` section Silent device case |
+
+Source identity of the run: `drvMultiFunction.cpp` SHA-256 `b4e05e793c0ef94640be6a50c7e41973e520ee6a993eb40ce4ac478ec32934c7`; `test_reconnect.pl` `7c488bd86e5b119dff87609abe8e47103b1e8b99e496fa3a8755a8c21a4a2f7c`; `reconnect_ioc.cpp` `cc832ef9b638ecb09c6b7ff7b9600ec63bee305df9b4a2e2c350bf8d7cb4762e`; `build_reconnect.pl` `c9f049c2ba64934b717e0d27b49fcdd0941cfc472c1ef1da0bb993351478a400`; `exit_loop.bash` `5f4a0f6085a08021f94508424297302de8913745de940d53c2d59786f96f9826`. No source file changed between the start of the run and these hashes. The driver before this change is the committed `0dd4827` `drvMultiFunction.cpp` built with the final tests.
+
+The healthy port's count rises above the control's because the silent port stops polling while it is disconnected, so the ratio measures how much of the window the silent port's attempts block. The original driver's 0.70 to 0.74 lies 0.06 below the 0.8 threshold, and the fixed driver's lowest value lies 0.92 above it.
 
 ##### Closure Evidence
 
 - Measured 2026-11-08 with the shipped harness and TC32 fixtures in a network namespace, in a two-port IOC over a 20-second window, three runs per condition: with the second device healthy 481, 512 and 483 requests and a longest pause of 0.71 to 0.76 seconds; with the second device's address removed after it had connected 240, 243 and 242 requests and a longest pause of 6.1 to 6.3 seconds. A comparison with an IOC whose second port was never created (10,302 requests) was an unlike baseline and is not used. The request trace shows 3.1 to 3.2 second stalls every 5.5 seconds, the length of one failed connection attempt under the process-wide mutex. No plan is accepted yet.
+- Observed 2026-11-08 with a first implementation that spaced every retry from the first failure: `reconnect` and `mac-known-absent` exceeded their 12-second recovery deadline, with 46 seconds between two attempts in `reconnect`, while `bounds-tc32-offline`, `bounds-e1608-offline`, `enum-e1608-init`, `mac-tc32-offline` and `endpoint-wrong-port` passed. The local evidence is under `work/m1-silent/early/`.
 
 ##### GitHub Projection
 

@@ -4,7 +4,10 @@
 offline. The port remains disconnected until the vendor library establishes a
 physical connection. The poller retries at most once every five seconds while
 the port is enabled and auto-connect is enabled. A vendor call can extend this
-interval by its own timeout.
+interval by its own timeout. After three consecutive failed attempts the
+interval grows to ten times the duration of the last failed attempt, at most
+60 seconds, and a successful connection restores the five-second interval;
+see "Silent devices" below.
 
 The driver uses the vendor library directly. `drvAsynIPPortConfigure` and its
 `asynOption` settings do not control this connection. Use the port-level asyn
@@ -96,7 +99,8 @@ A device selected by MAC address is looked up in the inventory built by the
 startup broadcast discovery. When the MAC is not in the inventory, for example
 because the device was powered off at startup, the connection attempt refreshes
 the inventory with one new broadcast and searches again. The poller's connect
-retry, at most once every five seconds per port, drives the attempts. The
+retry, at most once every five seconds per port for the first three failed
+attempts and spaced by their duration afterwards, drives the attempts. The
 refresh itself runs at most once every four seconds for the whole IOC, so
 several ports waiting for absent devices share one broadcast. The interval is
 shorter than the retry because a retry starts before it waits for the vendor
@@ -136,6 +140,47 @@ to. When a direct query returns a device whose MAC is already in the
 inventory, that entry is reused rather than duplicated. A selector that names
 the wrong discovery port for a device does not find it; the query times out
 and the port retries as for an absent device.
+
+## Silent devices
+
+Every vendor call of the IOC runs under one process-wide lock. ULDAQ protects
+each network device's own sockets, but its registry of created devices, which
+every call reads and device creation and release modify, has no lock, so calls
+on different devices cannot safely run in parallel.
+A network device that stops answering without closing its connection, as one
+that loses power does, makes each connection attempt wait for the vendor
+library's timeouts, about three seconds, and all other ports of the IOC wait
+for the lock in the meantime. With a five-second retry the healthy ports were
+blocked more than half of the time.
+
+The first three consecutive failed attempts of a port keep the five-second
+interval, so an outage of a few seconds recovers as quickly as before. From
+the third failure on, the next attempt waits ten times as long as the failed
+attempt took, at least five and at most 60 seconds; a device whose attempts
+time out after three seconds is then retried every 30 seconds and holds the
+lock about a tenth of the time. A device that answers again is connected at
+its next attempt, so it can take up to that interval to reappear. Disabling
+and enabling the port, or turning auto-connect off and on, starts the interval
+over, so an operator who has restored a device can ask for a prompt retry.
+The poller reads these settings every 0.1 seconds but not during a connection
+attempt, so keep the port disabled until an attempt in progress has ended,
+a few seconds; a shorter change can go unnoticed and leave the spaced
+interval in place.
+
+The spacing reduces how often a silent device blocks the other ports; it does
+not remove the blocking. These limits remain and need changes in ULDAQ:
+
+- Each attempt to a silent device still stops every other port for the
+  vendor's connection timeout, about three seconds, because ULDAQ 1.2.2 has no
+  way to configure its 3-second connection and command timeouts
+  (jeonghanlee/uldaq-env#3).
+- The read in progress when a device goes silent waits for one command
+  timeout, and the first three attempts of an outage, about 15 seconds, keep
+  the five-second retry, so the other ports are blocked during that time as
+  before.
+- The lock cannot be split per device while the vendor's device registry is
+  unprotected; with a protected registry a silent device would no longer
+  block the other ports at all.
 
 ## Linux vendor dependency
 
@@ -192,6 +237,10 @@ first device is absent and its inventory entry must survive the refresh.
 Endpoint cases run two devices at one IP address on different discovery ports,
 by address and by MAC, and check address, explicit default port, alternate
 port and host name selection against single devices.
+The silent-device case removes the address of a second TC32 after it has
+connected and checks that the healthy port keeps polling, that the silent port
+reconnects after the address returns, and that enabling it again after a spaced
+outage retries promptly.
 Real hardware power cycling, physical ADC calibration, analog output
 voltage, scan acquisition, EXP-32, USB, Windows and other models require
 separate verification.

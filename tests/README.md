@@ -358,6 +358,37 @@ described for the MAC cases. `endpoint-same-ip` and `endpoint-mixed` must
 fail `endpoint second port reads its device` with the second port reporting
 22.5, and the six other cases must pass.
 
+## Silent device case
+
+`silent-device` runs a healthy TC32 at `192.0.2.2` beside a second TC32 at
+`192.0.2.3`. After both are healthy it counts the requests the first fixture
+receives in 40 seconds, then removes `192.0.2.3` from the namespace with `ip`,
+so the second device's packets are dropped without a reset, as for a device
+that loses power. Beginning 25 seconds after the removal it counts the first
+fixture's requests over another 40 seconds and requires at least 80 percent of
+the first count and no pause longer than 4 seconds. It then restores the
+address and requires the second port to reconnect with 37.25 within 70
+seconds. A second outage of 22 seconds, long enough for the retry interval to
+be spaced, ends with the address restored and the second port disabled and
+enabled again, which must reconnect it within 12 seconds. The IOC must then
+exit normally. The case takes about two and a half minutes. Run it in the
+namespace shell of the other cases, which already has `192.0.2.3/32` on `lo`:
+
+```bash
+export TEMPLATE="$PWD/measCompApp/Db/measCompTemperatureIn.template"
+export IOC="$BUILD/reconnect-ioc"
+export DBD="$BUILD/reconnect.dbd"
+export RUNNER="$PWD/tests/test_reconnect.pl"
+timeout 240s perl "$RUNNER" --case silent-device "$IOC" "$DBD" "$TEMPLATE" "$BUILD/silent.log"
+exit
+```
+
+For the original-behavior control, build a scratch copy whose
+`measCompApp/src/drvMultiFunction.cpp` is the version from before the spaced
+retries, as described for the MAC cases, and run the same command from its
+root. It must fail `silent healthy port keeps polling`, because a five-second
+retry of a silent device blocks the healthy port more than half of the time.
+
 ## Exit loop
 
 The driver stops and joins each port's poller thread in an exit handler, so
@@ -425,6 +456,8 @@ driver defect.
 | `refresh-interval-equals-retry` | Set the minimum interval between discovery attempts to five seconds | `mac second device connects with its own value` in `mac-two-ports` when a refresh is skipped; the result varies with the retry phase |
 | `endpoint-ignore-port` | Match a direct-discovery entry by IP address alone | `endpoint second port reads its device` in `endpoint-same-ip` and `endpoint-mixed` |
 | `endpoint-no-default-port` | Record port 0 instead of the default discovery port for broadcast-discovered entries | `endpoint broadcast-discovered device is not queried again` in `endpoint-default-port`; the inventory stays correct because the direct query's result is matched by MAC, and `endpoint-mixed` is unaffected because a MAC selector never reaches the address lookup |
+| `silent-retry-unspaced` | Keep the five-second interval after every failed connection attempt | `silent healthy port keeps polling` in `silent-device` |
+| `silent-enable-keeps-spacing` | Do not reset the interval when the port or auto-connect is enabled again | `silent second port reconnects promptly after it is enabled again` in `silent-device` |
 
 This test does not establish hardware power-cycle behavior, sustained network
 loss endurance, Channel Access client reconnection, EXP-32, USB or Windows support.

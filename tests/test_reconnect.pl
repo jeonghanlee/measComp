@@ -39,9 +39,16 @@ my %CASES = map { $_ => 1 } qw(reconnect digital-word digital-control digital-po
     bounds-tc32-online bounds-tc32-offline bounds-e1608-online bounds-e1608-offline
     mac-tc32-online mac-tc32-offline mac-two-ports mac-known-absent
     endpoint-same-ip endpoint-mixed endpoint-distinct-ip endpoint-default-port endpoint-alt-port
-    endpoint-hostname endpoint-hostname-port endpoint-wrong-port);
+    endpoint-hostname endpoint-hostname-port endpoint-wrong-port silent-device);
 my $ALT_DISCOVERY_PORT = 54221;
 my $UNUSED_DISCOVERY_PORT = 54231;
+my $SILENT_ADDRESS = '192.0.2.3';
+my $SILENT_WINDOW = 40;
+my $SILENT_SETTLE = 25;
+my $SILENT_RATIO = 0.8;
+my $SILENT_PAUSE_LIMIT = 4;
+my $SILENT_RECOVERY = 70;
+my $SILENT_RESPACE = 22;
 my $FIXTURE_HOSTNAME = 'fixture-a';
 my @ANALOG_FIELDS = qw(bounds_status low high raw value slope offset egul eguf udf severity pact linear timestamp);
 my $ANALOG_TOLERANCE = 1e-10;
@@ -916,6 +923,94 @@ sub exercise_endpoint {
     return;
 }
 
+# The silent-device case runs a healthy TC32 port beside a second TC32 that is removed from the
+# network after it has connected, so its packets are dropped without a reset, as for a device that
+# loses power. A control window with both devices healthy precedes the silent window in the same run.
+sub setup_silent {
+    my ($run) = @_;
+    $run->{device} = TC32->new('192.0.2.2', undef, {mac => $MAC_A});
+    $run->{device}{online} = 1;
+    $run->{device_id} = '192.0.2.2';
+    $run->{device2} = TC32->new($SILENT_ADDRESS, undef, {mac => $MAC_B});
+    $run->{device2}{online} = 1;
+    $run->{device2}{temperature} = 37.25;
+    $run->{second_id} = $SILENT_ADDRESS;
+    return;
+}
+
+sub requests_between {
+    my ($device, $from, $to) = @_;
+    return scalar grep { $_->{time} >= $from && $_->{time} <= $to } @{$device->{traffic}};
+}
+
+sub exercise_silent {
+    my ($run) = @_;
+    my $first = $run->{device};
+    my $second = $run->{device2};
+    read_prefix($run, 'READY');
+    healthy($run, 22.5);
+    wait_b($run, 37.25);
+    my $control_from = now();
+    pause($run, $SILENT_WINDOW);
+    my $control_to = now();
+    my $control = requests_between($first, $control_from, $control_to);
+    my $control_gap = max_gap($first, $control_from, $control_to);
+    system('ip', 'addr', 'del', "$SILENT_ADDRESS/32", 'dev', 'lo') == 0
+        or die "cannot remove the second device address\n";
+    my $silent_from = now();
+    pause($run, $SILENT_SETTLE);
+    my $from = now();
+    pause($run, $SILENT_WINDOW);
+    my $to = now();
+    my $requests = requests_between($first, $from, $to);
+    my $gap = max_gap($first, $from, $to);
+    my $absent = state_b($run);
+    check($run, 'silent second port reported disconnected', $absent->{connected} == 0 && $absent->{severity} == 3,
+        $absent);
+    check($run, 'silent healthy port keeps polling',
+        $control > 0 && $requests >= $SILENT_RATIO * $control && $gap <= $SILENT_PAUSE_LIMIT,
+        {control => $control, control_gap => $control_gap, requests => $requests, longest_gap => $gap,
+         ratio => $control ? $requests / $control : undef, window_start => $from - $silent_from});
+    system('ip', 'addr', 'add', "$SILENT_ADDRESS/32", 'dev', 'lo') == 0
+        or die "cannot restore the second device address\n";
+    my $back = now();
+    my $state = state_b($run);
+    while (now() < $back + $SILENT_RECOVERY) {
+        $state = state_b($run);
+        last if $state->{connected} == 1 && $state->{severity} == 0 && abs($state->{value} - 37.25) < 0.001;
+        pause($run, 0.5);
+    }
+    check($run, 'silent second port reconnects with its own value', $state->{connected} == 1
+        && $state->{severity} == 0 && abs($state->{value} - 37.25) < 0.001,
+        {state => $state, seconds => now() - $back});
+
+    # A second outage lasts until the interval is spaced; enabling the port again must retry promptly.
+    system('ip', 'addr', 'del', "$SILENT_ADDRESS/32", 'dev', 'lo') == 0
+        or die "cannot remove the second device address\n";
+    pause($run, $SILENT_RESPACE);
+    system('ip', 'addr', 'add', "$SILENT_ADDRESS/32", 'dev', 'lo') == 0
+        or die "cannot restore the second device address\n";
+    check($run, 'silent disable second port', command($run, 'ENABLEB 0') eq 'RESULT 0', 'ENABLEB 0');
+    pause($run, 0.5);
+    check($run, 'silent enable second port', command($run, 'ENABLEB 1') eq 'RESULT 0', 'ENABLEB 1');
+    my $enabled_at = now();
+    my $again = state_b($run);
+    while (now() < $enabled_at + $RECOVERY_TIMEOUT) {
+        $again = state_b($run);
+        last if $again->{connected} == 1 && $again->{severity} == 0 && abs($again->{value} - 37.25) < 0.001;
+        pause($run, 0.5);
+    }
+    check($run, 'silent second port reconnects promptly after it is enabled again', $again->{connected} == 1
+        && $again->{severity} == 0 && abs($again->{value} - 37.25) < 0.001,
+        {state => $again, seconds => now() - $enabled_at});
+    check($run, 'silent fixture commands supported', !@{$first->{errors}} && !@{$second->{errors}},
+        {first => $first->{errors}, second => $second->{errors}});
+    print {$run->{input}} "QUIT\n" or die "IOC input write: $!\n";
+    wait_exit($run, $EXIT_TIMEOUT) or die "IOC exit deadline exceeded\n";
+    check($run, 'silent IOC exits normally', $run->{ioc_exit} == 0, $run->{ioc_exit});
+    return;
+}
+
 sub digital_window {
     my ($run) = @_;
     my $device = $run->{device};
@@ -1230,6 +1325,7 @@ sub main {
         ($run->{family}, $run->{model}, $run->{startup}) = $case =~ /\A(enum|bounds)-(tc32|e1608)-(online|offline|init)\z/;
         if ($case =~ /\Amac-/) { setup_mac($run); }
         elsif ($case =~ /\Aendpoint-/) { setup_endpoint($run); }
+        elsif ($case eq 'silent-device') { setup_silent($run); }
         else { $run->{device} = ($run->{model} // '') eq 'e1608' ? E1608->new() : TC32->new(); }
         $run->{device}{online} = 1 if $case =~ /-online\z/;
         launch_ioc($run, $executable, $dbd, $template);
@@ -1237,6 +1333,7 @@ sub main {
         elsif ($case eq 'mac-two-ports') { exercise_mac_two($run); }
         elsif ($case eq 'mac-known-absent') { exercise_mac_known($run); }
         elsif ($case =~ /\Aendpoint-/) { exercise_endpoint($run); }
+        elsif ($case eq 'silent-device') { exercise_silent($run); }
         elsif ($case =~ /\Amac-/) { exercise_mac($run); }
         elsif ($run->{model}) { exercise_enums($run); }
         elsif ($case eq 'reconnect') { exercise($run); }
@@ -1284,7 +1381,7 @@ Print usage and exit successfully.
 
 =item --case NAME
 
-Select reconnect (default), digital-word, digital-control, digital-policy, digital-bits, enum-tc32-online, enum-tc32-offline, enum-e1608-online, enum-e1608-offline, enum-e1608-init, bounds-tc32-online, bounds-tc32-offline, bounds-e1608-online, bounds-e1608-offline, mac-tc32-online, mac-tc32-offline, mac-two-ports, mac-known-absent, endpoint-same-ip, endpoint-mixed, endpoint-distinct-ip, endpoint-default-port, endpoint-alt-port, endpoint-hostname, endpoint-hostname-port or endpoint-wrong-port. Each invocation creates a fresh IOC and its external fixtures.
+Select reconnect (default), digital-word, digital-control, digital-policy, digital-bits, enum-tc32-online, enum-tc32-offline, enum-e1608-online, enum-e1608-offline, enum-e1608-init, bounds-tc32-online, bounds-tc32-offline, bounds-e1608-online, bounds-e1608-offline, mac-tc32-online, mac-tc32-offline, mac-two-ports, mac-known-absent, endpoint-same-ip, endpoint-mixed, endpoint-distinct-ip, endpoint-default-port, endpoint-alt-port, endpoint-hostname, endpoint-hostname-port, endpoint-wrong-port or silent-device. Each invocation creates a fresh IOC and its external fixtures.
 
 Enum cases compare all record enum states with public driver reads and model-specific expected values, write every supported selection through the record, and check RVAL, SDEF, asynchronous completion, alarm severity and public driver readback. They repeat two transport failures and reconnects. The init case holds the real IOC after record initialization, enables device responses, proves connection while interruptAccept is zero, and resumes IOC initialization.
 
@@ -1293,6 +1390,8 @@ Bounds cases check TC32 24-bit conversion metadata without valid voltage samples
 MAC cases select each TC32 fixture by MAC address, so the real driver finds it through broadcast discovery. mac-tc32-offline observes the absent device for eleven seconds while the fixture records every broadcast discovery request, then makes it available and requires a valid reading within twelve seconds. The recorded requests must number two or three and be at least 3.9 seconds apart, the four-second minimum refresh interval less a tolerance. mac-tc32-online requires the startup discovery to be the only discovery request through an idle interval, an EOF reconnect, and periods with auto-connect disabled and with the port disabled while the device is absent. mac-two-ports runs a second port, selected by a lower-case MAC with hexadecimal letters and with a different temperature, whose device appears while the first port stays connected and must connect within eight seconds, which a skipped refresh would exceed; the first port must keep its single connection and value, must never go three seconds without a request from the moment it is healthy, and the inventory must list exactly two distinct MAC addresses. mac-known-absent takes the first device offline before the second device appears, then requires the inventory to keep both MAC addresses and the first port to reconnect from its inventory entry without another discovery request.
 
 Endpoint cases select devices by IP address, discovery port, hostname or MAC and require every port to read its own device with a single connection per fixture. endpoint-same-ip runs two fixtures at one IP address on discovery ports 54211 and 54221; endpoint-mixed selects the first of them by MAC through broadcast discovery and the second by IP address and port 54221; endpoint-distinct-ip runs two fixtures at distinct addresses. endpoint-default-port selects a broadcast-discovered device with an explicit default port and requires one inventory entry; endpoint-alt-port runs one fixture on port 54221; endpoint-hostname selects one fixture by a name that the namespace resolves through a bind-mounted hosts file and requires the resolved address in the inventory; endpoint-hostname-port selects a fixture on port 54221 by that name and port. endpoint-wrong-port names a discovery port nobody listens on and requires the port to stay disconnected with an empty inventory.
+
+The silent-device case runs a healthy TC32 port beside a second TC32 whose address is removed from the namespace after it has connected, so its packets are dropped without a reset. It compares the healthy port's requests in a 40-second window that begins 25 seconds after the removal with a 40-second window measured before it, requires at least 80 percent of that count and no pause longer than 4 seconds, then restores the address and requires the second port to reconnect with its own value within 70 seconds. A second outage of 22 seconds, long enough for the interval to be spaced, ends with the address restored and the second port disabled and enabled again, which must reconnect it within 12 seconds. It needs the network namespace of the other cases and the ip command.
 
 =back
 

@@ -318,6 +318,8 @@ int main(int argc, char **argv)
             std::printf("RESULT %d\n", pasynFloat64SyncIO->writeOnce("DAQ", 0, value, 2.0, "POLL_SLEEP_MS"));
         else if (std::sscanf(command, "AUTO %d", &value) == 1)
             std::printf("RESULT %d\n", asynAutoConnect("DAQ", -1, value));
+        else if (std::sscanf(command, "ENABLEB %d", &value) == 1)
+            std::printf("RESULT %d\n", portB ? asynEnable("DAQ2", -1, value) : -1);
         else if (std::sscanf(command, "ENABLE %d", &value) == 1)
             std::printf("RESULT %d\n", asynEnable("DAQ", -1, value));
         else if (std::sscanf(command, "READTC %d", &value) == 1)
