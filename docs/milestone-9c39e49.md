@@ -8,11 +8,11 @@ Git upstream: origin/site
 Remote tracker: [jeonghanlee/measComp milestone 2](https://github.com/jeonghanlee/measComp/milestone/2)
 GitHub milestone: Network thermocouple acquisition
 Due date: none
-Remote milestone observed at: 2026-11-08T05:09:19Z; state: open; five open issues (#11 to #15) and no closed issue
+Remote milestone observed at: 2026-11-08T09:41:22Z; state: open; four open issues (#12 to #15) and one closed issue (#11)
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/2`.
 Baseline commit: 9c39e491e463fac77f15cfcec16aa8b4a97cbf10
 
-Next session entry point: Finish the review of the M1 (issue #11) implementation, record M1 / T3, and commit the implementation; then close issue #11 and mark M1 Complete. Issues #11 to #15 are assigned to GitHub milestone 2.
+Next session entry point: Review and accept the plan of M2 (issue #12) in its detail, the nearest Ready row; then implement it. Post the pending comment on jeonghanlee/uldaq-env#3 that links commit 73a1164. Issues #11 to #15 are assigned to GitHub milestone 2.
 
 ## Scope
 
@@ -28,13 +28,13 @@ The common integration environment is Linux with the real measComp driver, EPICS
 
 | ID | Work unit | Type | Status | Ready | Deps | Done when / Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| M1 | Silent device stalls other ports | Carry-forward | In progress | No | | A healthy port keeps polling beside a silent network device; issue #11; [detail](#m1---silent-device-stalls-other-ports) |
+| M1 | Silent device stalls other ports | Carry-forward | Complete | No | | A healthy port keeps polling beside a silent network device; issue #11; [detail](#m1---silent-device-stalls-other-ports) |
 | M2 | Persistent read error logging | Carry-forward | Not started | Yes | | A persistent thermocouple read error is reported once per change; issue #12; [detail](#m2---persistent-read-error-logging) |
 | M3 | Single-request thermocouple read and acquisition time | Carry-forward | Not started | Yes | | One temperature request per scale group per poll with one acquisition timestamp; issue #13; [detail](#m3---single-request-thermocouple-read-and-acquisition-time) |
 | M4 | Thermocouple device diagnostics | Carry-forward | Not started | Yes | | Cold-junction temperatures, mains rejection and calibration information are exposed; issue #14; [detail](#m4---thermocouple-device-diagnostics) |
 | M5 | Temperature filter on Linux | Carry-forward | Not started | Yes | | The temperature filter takes effect on Linux; issue #15; [detail](#m5---temperature-filter-on-linux) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: one In progress and four Not started. `Ready` records dependency readiness only. No external prerequisite is established for these rows.
+The row order follows issue numbers and imposes no execution dependency. Current status: one Complete and four Not started. `Ready` records dependency readiness only. No external prerequisite is established for these rows.
 
 ### Milestone Details
 
@@ -43,7 +43,7 @@ The row order follows issue numbers and imposes no execution dependency. Current
 Origin: 9c39e49 / M1
 Identity History: none
 GitHub Issue: [#11](https://github.com/jeonghanlee/measComp/issues/11)
-Status: In progress
+Status: Complete
 
 ##### Summary
 
@@ -105,16 +105,19 @@ The healthy port's count rises above the control's because the silent port stops
 
 - Measured 2026-11-08 with the shipped harness and TC32 fixtures in a network namespace, in a two-port IOC over a 20-second window, three runs per condition: with the second device healthy 481, 512 and 483 requests and a longest pause of 0.71 to 0.76 seconds; with the second device's address removed after it had connected 240, 243 and 242 requests and a longest pause of 6.1 to 6.3 seconds. A comparison with an IOC whose second port was never created (10,302 requests) was an unlike baseline and is not used. The request trace shows 3.1 to 3.2 second stalls every 5.5 seconds, the length of one failed connection attempt under the process-wide mutex. No plan is accepted yet.
 - Observed 2026-11-08 with a first implementation that spaced every retry from the first failure: `reconnect` and `mac-known-absent` exceeded their 12-second recovery deadline, with 46 seconds between two attempts in `reconnect`, while `bounds-tc32-offline`, `bounds-e1608-offline`, `enum-e1608-init`, `mac-tc32-offline` and `endpoint-wrong-port` passed. The local evidence is under `work/m1-silent/early/`.
+- Landed: observed 2026-11-08T09:41:22Z after `git fetch`, `origin/site` is at commit 73a116466c52277443b666a3a2fe24588280def8, the same commit as the local `HEAD`, and the six changed paths of that commit (`measCompApp/src/drvMultiFunction.cpp`, `tests/reconnect_ioc.cpp`, `tests/test_reconnect.pl`, `tests/README.md`, `docs/reconnection.md`, `docs/milestone-9c39e49.md`) show no difference between that commit and `origin/site`. Recheck with `git diff 73a1164 origin/site -- <path>`.
+- Issue: the owner delegated the issue operations on 2026-11-08; the body was synchronized with the implemented rule and its five acceptance criteria were checked, a closing comment was posted and issue #11 was closed as completed at 2026-11-08T09:31:22Z. The read-back shows state CLOSED, label bug and milestone 2.
+- Remaining stalls: the 3-second stall of each attempt to a silent device needs the configurable timeouts of jeonghanlee/uldaq-env#3, and the lock cannot be split per device until the vendor registry is protected; both stay outside this unit.
 
 ##### GitHub Projection
 
 Title: Keep a silent network device from stalling the other ports of the IOC
 Labels: bug
 GitHub Milestone: Network thermocouple acquisition (milestone 2)
-Observed State: open
+Observed State: closed
 Observed Labels: bug
 Observed Milestone: Network thermocouple acquisition (milestone 2)
-Last Compared: 2026-11-08T05:41:09Z; remote updated at 2026-11-08T05:41:08Z
+Last Compared: 2026-11-08T09:41:22Z; remote updated at 2026-11-08T09:31:22Z
 
 #### M2 - Persistent Read Error Logging
 
