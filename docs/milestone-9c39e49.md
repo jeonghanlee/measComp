@@ -12,7 +12,7 @@ Remote milestone observed at: 2026-11-08T05:09:19Z; state: open; five open issue
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/2`.
 Baseline commit: 9c39e491e463fac77f15cfcec16aa8b4a97cbf10
 
-Next session entry point: Choose the first work unit and accept its plan; M1 (issue #11) is recommended because it is a measured defect that affects every port of an IOC. Issues #11 to #15 are assigned to GitHub milestone 2.
+Next session entry point: Implement M1 (issue #11) from its accepted plan in `measCompApp/src/drvMultiFunction.cpp` and the silent-device test cases. Issues #11 to #15 are assigned to GitHub milestone 2.
 
 ## Scope
 
@@ -47,51 +47,57 @@ Status: Not started
 
 ##### Summary
 
-A network device that stops answering without closing its connection nearly stops the other ports of the same IOC: with a second device dropping packets after it had connected, a healthy TC32 port received 244 requests in 20 seconds instead of 10,302 and paused for up to 6.2 seconds. The process-wide `ULMutex` is held for the whole poll and during `connect()`, while ULDAQ waits 3 seconds per connection and command. The shipped fixtures model an offline device as an immediate close, so the case was never exercised.
+A network device that stops answering without closing its connection stalls the other ports of the same IOC: with a second TC32 device dropping packets after it had connected, a healthy TC32 port received about half the requests it receives beside a healthy second device (240 to 243 against 481 to 512 in 20 seconds over three runs each) and paused for up to 6.3 seconds instead of 0.76 seconds, in stalls of about 3.1 seconds that repeat every 5.5 seconds. The process-wide `ULMutex` is held for the whole poll and during `connect()`, while ULDAQ waits 3 seconds per connection and command. The shipped fixtures model an offline device as an immediate close, so the case was never exercised.
 
 ##### Scope
 
-Make the connection attempt and descriptor query of a disconnected device without the process-wide mutex and lengthen the retry interval of a device whose attempts keep timing out, after establishing whether ULDAQ allows concurrent calls on different devices.
+Space the reconnection attempts of a port by the time its failed attempts take, so a device whose attempts time out cannot hold the process-wide mutex for more than a tenth of the time. Narrowing the mutex per device is not part of this unit.
 
-Out of scope: Changing the vendor timeouts, which jeonghanlee/uldaq-env#3 covers, the broadcast discovery wait and other single-device behavior.
+Out of scope: Changing the vendor timeouts, which jeonghanlee/uldaq-env#3 covers, splitting the process-wide mutex per device, the broadcast discovery wait, and the first stall of about six seconds when a connected device goes silent, which one read timeout and one connection timeout cause.
 
 ##### Completion Criteria
 
-- A shipped case runs a healthy TC32 port beside a device that drops packets, before it answers and after it stops answering.
-- The healthy port never pauses longer than 1 second and its request count stays within 10 percent of a run without the silent device.
-- The silent port is reported disconnected and reconnects with its own value when the device answers again.
+- A shipped case runs a healthy TC32 port beside a second TC32 device that is dropped after it has connected, with a healthy-second-device control in the same case set.
+- Once the retry interval has grown, beginning 12 seconds after the device goes silent, the healthy port's request count over a 40-second window is at least 80 percent of the control's, and no pause in that window is longer than 3.5 seconds.
+- The retry interval after a failed attempt is the larger of 5 seconds and 10 times the attempt's duration, capped at 60 seconds, and returns to 5 seconds after a successful connection; an attempt that fails at once keeps the 5-second interval.
+- The silent port is reported disconnected while the device is silent and reconnects with its own value within the capped interval after the device answers again.
 - The existing cases pass unchanged.
 - The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
-
 ##### Dependencies And Decisions
 
 - None. No work or external gate must complete first.
 - Decision Date: 2026-11-08. The owner assigned this work to the Network thermocouple acquisition milestone, GitHub milestone 2.
-
+- Decision Date: 2026-11-08. The owner chose to space the retry attempts by their duration and not to split the process-wide mutex per device: the vendor library keeps its device registry in a `std::map` without a lock, so concurrent calls on different devices would need a readers-writer lock and a thread-sanitizer check, and the mutex narrowing is revisited only if the spaced retries prove insufficient. The multiplier of 10 and the cap of 60 seconds are accepted with the plan.
 ##### Implementation Plan
 
-Plan Status: draft
-Plan Acceptance: none
-Implementation Authorization: none
+Plan Status: accepted
+Plan Acceptance: 2026-11-08; accepted by the owner after the like-for-like measurement of the stall, the vendor library's unlocked device registry and the choice between spacing the retries and splitting the mutex were reviewed.
+Implementation Authorization: 2026-11-08; implement and verify the accepted plan items 1 to 3.
 Superseded Plan Artifacts: none
 
-1. Implement the change described in Scope in `measCompApp/src/drvMultiFunction.cpp` with the shipped test case named in the Completion Criteria. Verified by T1.
+1. In `measCompApp/src/drvMultiFunction.cpp`, measure the duration of each vendor connection attempt inside `connect()` after the process-wide mutex is held, so the wait for the mutex is not counted, and keep a per-port retry interval that the reconnect gate uses in place of the fixed `RECONNECT_DELAY`: after a failed attempt the interval is the larger of `RECONNECT_DELAY` and 10 times the duration, capped at 60 seconds, and a successful attempt resets it. The inventory refresh interval stays below the 5-second minimum, as the MAC rediscovery design requires. Verified by T1 and T2.
+2. In `tests/test_reconnect.pl`, add a case where the second device is removed from the network after it has connected, with a control case where it stays healthy, and measure the healthy port's request count and longest pause from the fixture traffic. Verified by T1.
+3. In `docs/reconnection.md` and `tests/README.md`, describe the adaptive retry interval and the new cases. Verified by T3.
 
 ##### Test Plan
 
 | Label | Layer | Method | Environment | Expected Result |
 | --- | --- | --- | --- | --- |
-| T1 | Integration | Run the new shipped case and the existing cases with the README commands. | Common integration environment | The Completion Criteria hold and the existing cases pass. |
+| T1 | Integration | Run the new silent-device case and its healthy control, three runs each, and compare the healthy port's requests and longest pause over the window that begins 12 seconds after the device goes silent; then make the device answer again and wait for the silent port. | Common integration environment; two TC32 fixtures, the second one removed from the network | Request count at least 80 percent of the control, no pause longer than 3.5 seconds, the silent port reconnects within the capped interval; the unchanged driver fails the request and pause assertions. |
+| T2 | Regression | Run the 18 shipped cases, the 8 endpoint cases and the exit loop, the Perl checks on Debian 13 and Rocky 8 and the compile of the changed C++ files on Rocky 8. | Same environment; Perl 5.40.1 and 5.26.3 | All pass with normal IOC exit; cases that fail at once keep the 5-second retry. |
+| T3 | Review | Read the changed `docs/reconnection.md` and `tests/README.md` as the operator who sets up the case. | Repository documents | The retry interval, its cap and the remaining first stall are described. |
 
 ##### Verification Results
 
 | Label | Observed At | Environment | Result | Evidence |
 | --- | --- | --- | --- | --- |
 | T1 | Not run | Common integration environment | Pending | none |
+| T2 | Not run | Common integration environment | Pending | none |
+| T3 | Not run | Repository documents | Pending | none |
 
 ##### Closure Evidence
 
-- Measured 2026-11-08 with the shipped harness and TC32 fixtures in a network namespace, the second device's address removed so its packets are dropped: 244 requests and a longest pause of 6.2 seconds after connection, 10,302 requests and 1.06 seconds when the device never answered. No plan is accepted yet.
+- Measured 2026-11-08 with the shipped harness and TC32 fixtures in a network namespace, in a two-port IOC over a 20-second window, three runs per condition: with the second device healthy 481, 512 and 483 requests and a longest pause of 0.71 to 0.76 seconds; with the second device's address removed after it had connected 240, 243 and 242 requests and a longest pause of 6.1 to 6.3 seconds. A comparison with an IOC whose second port was never created (10,302 requests) was an unlike baseline and is not used. The request trace shows 3.1 to 3.2 second stalls every 5.5 seconds, the length of one failed connection attempt under the process-wide mutex. No plan is accepted yet.
 
 ##### GitHub Projection
 
@@ -101,7 +107,7 @@ GitHub Milestone: Network thermocouple acquisition (milestone 2)
 Observed State: open
 Observed Labels: bug
 Observed Milestone: Network thermocouple acquisition (milestone 2)
-Last Compared: 2026-11-08T05:09:19Z; remote updated at 2026-11-08T05:09:13Z
+Last Compared: 2026-11-08T05:41:09Z; remote updated at 2026-11-08T05:41:08Z
 
 #### M2 - Persistent Read Error Logging
 
