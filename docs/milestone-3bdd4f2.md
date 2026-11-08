@@ -12,7 +12,7 @@ Remote milestone observed at: 2026-11-07T17:39:15Z; state: open; six closed issu
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/1`.
 Baseline commit: 3bdd4f24d820579f3f423c7be968baf2bb413950
 
-Next session entry point: All eight work units are complete and landed on `origin/site`; the six milestone issues and issue #8 are closed. Backlog M9 (USB counter poller exit race) awaits an owner decision, and Backlog M10 and M11 (issues #9 and #10) wait for G1, a USB board whose model is not yet known. Closing the GitHub milestone is the owner's step, which this document does not perform.
+Next session entry point: All eight work units are complete and landed on `origin/site`; the six milestone issues and issue #8 are closed. The Backlog holds M9, M10 and M11 (M10 and M11 wait for G1, a USB board whose model is not yet known) and M12 to M16 (issues #11 to #15, found by comparing the driver with ULDAQ), all awaiting owner decisions. Closing the GitHub milestone is the owner's step, which this document does not perform.
 
 ## Scope
 
@@ -773,6 +773,11 @@ Last Compared: 2026-11-07T17:39:14Z; remote updated at 2026-11-07T17:38:34Z
 | M10 | Generator transport-error handling | Carry-forward | Blocked | No | G1 | A transport error in a generator write disconnects the port and the first error code is kept; the network temperature devices are unchanged; [detail](#m10---generator-transport-error-handling) |
 | M11 | Open-detect result on input type change | Carry-forward | Blocked | No | G1 | A connection error from the open-detect call in the input-type branch disconnects the port; [detail](#m11---open-detect-result-on-input-type-change) |
 | G1 | USB board for hardware verification | External gate | Open | No | | A USB board that exercises M10 or M11 is available and its model is recorded; [detail](#g1---usb-board-for-hardware-verification) |
+| M12 | Silent device stalls other ports | Carry-forward | Open | No | | Issue #11; priority and scope are undecided; [detail](#m12---silent-device-stalls-other-ports) |
+| M13 | Persistent read error logging | Carry-forward | Open | No | | Issue #12; priority and scope are undecided; [detail](#m13---persistent-read-error-logging) |
+| M14 | Single-request thermocouple read and acquisition time | Carry-forward | Open | No | | Issue #13; priority and scope are undecided; [detail](#m14---single-request-thermocouple-read-and-acquisition-time) |
+| M15 | Thermocouple device diagnostics | Carry-forward | Open | No | | Issue #14; priority and scope are undecided; [detail](#m15---thermocouple-device-diagnostics) |
+| M16 | Temperature filter on Linux | Carry-forward | Open | No | | Issue #15; priority and scope are undecided; [detail](#m16---temperature-filter-on-linux) |
 
 ### Backlog Details
 
@@ -993,3 +998,322 @@ M10 and M11 need a hardware check on a USB board: M10 on a board with a pulse ge
 ##### Closure Evidence
 
 - none
+
+#### M12 - Silent Device Stalls Other Ports
+
+Origin: 3bdd4f2 / M12
+Identity History: none
+GitHub Issue: [#11](https://github.com/jeonghanlee/measComp/issues/11)
+Status: Open
+
+##### Summary
+
+A network device that stops answering without closing its connection nearly stops the other ports of the same IOC: with a second device dropping packets after it had connected, a healthy TC32 port received 244 requests in 20 seconds instead of 10,302 and paused for up to 6.2 seconds. The process-wide `ULMutex` is held for the whole poll and during `connect()`, while ULDAQ waits 3 seconds per connection and command. The shipped fixtures model an offline device as an immediate close, so the case was never exercised.
+
+##### Scope
+
+Make the connection attempt and descriptor query of a disconnected device without the process-wide mutex and lengthen the retry interval of a device whose attempts keep timing out, after establishing whether ULDAQ allows concurrent calls on different devices.
+
+Out of scope: Changing the vendor timeouts, which jeonghanlee/uldaq-env#3 covers, the broadcast discovery wait and other single-device behavior.
+
+##### Completion Criteria
+
+- A shipped case runs a healthy TC32 port beside a device that drops packets, before it answers and after it stops answering.
+- The healthy port never pauses longer than 1 second and its request count stays within 10 percent of a run without the silent device.
+- The silent port is reported disconnected and reconnects with its own value when the device answers again.
+- The existing cases pass unchanged.
+- The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
+
+##### Dependencies And Decisions
+
+- None. Priority and scope await an owner decision; the row stays Open until then.
+
+##### Implementation Plan
+
+Plan Status: draft
+Plan Acceptance: none
+Implementation Authorization: none
+Superseded Plan Artifacts: none
+
+1. Implement the change described in Scope in `measCompApp/src/drvMultiFunction.cpp` with the shipped test case named in the Completion Criteria. Verified by T1.
+
+##### Test Plan
+
+| Label | Layer | Method | Environment | Expected Result |
+| --- | --- | --- | --- | --- |
+| T1 | Integration | Run the new shipped case and the existing cases with the README commands. | Common integration environment | The Completion Criteria hold and the existing cases pass. |
+
+##### Verification Results
+
+| Label | Observed At | Environment | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| T1 | Not run | Common integration environment | Pending | none |
+
+##### Closure Evidence
+
+- Measured 2026-11-08 with the shipped harness and TC32 fixtures in a network namespace, the second device's address removed so its packets are dropped: 244 requests and a longest pause of 6.2 seconds after connection, 10,302 requests and 1.06 seconds when the device never answered. No plan is accepted yet.
+
+##### GitHub Projection
+
+Title: Keep a silent network device from stalling the other ports of the IOC
+Labels: bug
+GitHub Milestone: none
+Observed State: open
+Observed Labels: bug
+Observed Milestone: none
+Last Compared: 2026-11-08T04:44:38Z; remote updated at 2026-11-08T04:44:38Z
+
+#### M13 - Persistent Read Error Logging
+
+Origin: 3bdd4f2 / M13
+Identity History: none
+GitHub Issue: [#12](https://github.com/jeonghanlee/measComp/issues/12)
+Status: Open
+
+##### Summary
+
+A TC32 channel outside the common-mode range makes `ulTIn()` return `ERR_CMR_EXCEEDED` on every read, and the poller calls `reportError()` for the channel on every poll: with the fixture reporting the condition on every channel, the IOC printed 3,040 error lines in about five seconds while the records stayed INVALID with their last value.
+
+##### Scope
+
+Report a channel's read error when its status changes and once when it returns to normal, keeping the per-channel INVALID status on every poll and the open-thermocouple value.
+
+Out of scope: Connection errors, the open-thermocouple value and other boards' read paths.
+
+##### Completion Criteria
+
+- A persistent condition produces one line when it starts and one when it ends.
+- The record is INVALID while the condition lasts and recovers afterwards.
+- `LAST_ERROR_MESSAGE` names the condition while it lasts.
+- A shipped case drives the condition from the TC32 fixture and counts the lines, and the existing cases pass unchanged.
+- The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
+
+##### Dependencies And Decisions
+
+- None. Priority and scope await an owner decision; the row stays Open until then.
+
+##### Implementation Plan
+
+Plan Status: draft
+Plan Acceptance: none
+Implementation Authorization: none
+Superseded Plan Artifacts: none
+
+1. Implement the change described in Scope in `measCompApp/src/drvMultiFunction.cpp` with the shipped test case named in the Completion Criteria. Verified by T1.
+
+##### Test Plan
+
+| Label | Layer | Method | Environment | Expected Result |
+| --- | --- | --- | --- | --- |
+| T1 | Integration | Run the new shipped case and the existing cases with the README commands. | Common integration environment | The Completion Criteria hold and the existing cases pass. |
+
+##### Verification Results
+
+| Label | Observed At | Environment | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| T1 | Not run | Common integration environment | Pending | none |
+
+##### Closure Evidence
+
+- Measured 2026-11-08 with the shipped harness and the TC32 fixture returning the common-mode sentinel -7777: 3,040 lines in about five seconds, severity INVALID, value held at 22.5. No plan is accepted yet.
+
+##### GitHub Projection
+
+Title: Report a persistent thermocouple read error once instead of on every poll
+Labels: bug
+GitHub Milestone: none
+Observed State: open
+Observed Labels: bug
+Observed Milestone: none
+Last Compared: 2026-11-08T04:44:38Z; remote updated at 2026-11-08T04:44:17Z
+
+#### M14 - Single Request Thermocouple Read And Acquisition Time
+
+Origin: 3bdd4f2 / M14
+Identity History: none
+GitHub Issue: [#13](https://github.com/jeonghanlee/measComp/issues/13)
+Status: Open
+
+##### Summary
+
+The poller reads the TC32 and E-TC one channel per `ulTIn()`, which ULDAQ implements as a one-channel `tInArray()`, so each channel costs its own request under the process-wide mutex, the channels of one poll are read at different moments, and the driver never sets the asyn timestamp.
+
+##### Scope
+
+Read each poll with `ulTInArray()` grouped by temperature scale, take per-channel results from the -9999 and -7777 values the call fills in before returning a range-wide status, and call `updateTimeStamp()` once after the read.
+
+Out of scope: USB thermocouple boards, the default poll period and the posting of unchanged values.
+
+##### Completion Criteria
+
+- One temperature request per scale group per poll on the TC32 and E-TC fixtures, counted from the fixture traffic.
+- All channels of a poll carry one timestamp, usable with `TSE=-2`.
+- Open and out-of-range channels are handled per channel without affecting the others.
+- Per-channel scales keep their values, and the existing cases pass unchanged.
+- The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
+
+##### Dependencies And Decisions
+
+- None. Priority and scope await an owner decision; the row stays Open until then.
+
+##### Implementation Plan
+
+Plan Status: draft
+Plan Acceptance: none
+Implementation Authorization: none
+Superseded Plan Artifacts: none
+
+1. Implement the change described in Scope in `measCompApp/src/drvMultiFunction.cpp` with the shipped test case named in the Completion Criteria. Verified by T1.
+
+##### Test Plan
+
+| Label | Layer | Method | Environment | Expected Result |
+| --- | --- | --- | --- | --- |
+| T1 | Integration | Run the new shipped case and the existing cases with the README commands. | Common integration environment | The Completion Criteria hold and the existing cases pass. |
+
+##### Verification Results
+
+| Label | Observed At | Environment | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| T1 | Not run | Common integration environment | Pending | none |
+
+##### Closure Evidence
+
+- Found 2026-11-08 by reading `AiETc32::tIn()`, `AiETc32::tInArray()`, `AiETc::tInArray()` and the poller; not measured. No plan is accepted yet.
+
+##### GitHub Projection
+
+Title: Read all thermocouple channels in one request and stamp the acquisition time
+Labels: enhancement
+GitHub Milestone: none
+Observed State: open
+Observed Labels: enhancement
+Observed Milestone: none
+Last Compared: 2026-11-08T04:44:38Z; remote updated at 2026-11-08T04:44:18Z
+
+#### M15 - Thermocouple Device Diagnostics
+
+Origin: 3bdd4f2 / M15
+Identity History: none
+GitHub Issue: [#14](https://github.com/jeonghanlee/measComp/issues/14)
+Status: Open
+
+##### Summary
+
+ULDAQ implements, and the driver does not expose, the cold-junction temperatures, the TC32 50 or 60 Hz rejection, the calibration table selection and the calibration dates of the network TC32 and E-TC.
+
+##### Scope
+
+Add parameters and records for these items and restore the settings after a reconnect as for the thermocouple type.
+
+Out of scope: Other boards, alarm outputs and calibration itself.
+
+##### Completion Criteria
+
+- The cold-junction temperatures are read on every poll.
+- The rejection frequency and calibration table can be set, read back and survive a reconnect.
+- The calibration dates are readable after connection.
+- The fixtures implement the commands, a shipped case checks each item, and the existing cases pass unchanged.
+- The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
+
+##### Dependencies And Decisions
+
+- None. Priority and scope await an owner decision; the row stays Open until then.
+
+##### Implementation Plan
+
+Plan Status: draft
+Plan Acceptance: none
+Implementation Authorization: none
+Superseded Plan Artifacts: none
+
+1. Implement the change described in Scope in `measCompApp/src/drvMultiFunction.cpp` with the shipped test case named in the Completion Criteria. Verified by T1.
+
+##### Test Plan
+
+| Label | Layer | Method | Environment | Expected Result |
+| --- | --- | --- | --- | --- |
+| T1 | Integration | Run the new shipped case and the existing cases with the README commands. | Common integration environment | The Completion Criteria hold and the existing cases pass. |
+
+##### Verification Results
+
+| Label | Observed At | Environment | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| T1 | Not run | Common integration environment | Pending | none |
+
+##### Closure Evidence
+
+- Found 2026-11-08 by reading the ULDAQ `AiETc32` and `AiETc` implementations against the driver; not measured. No plan is accepted yet.
+
+##### GitHub Projection
+
+Title: Expose the cold-junction temperatures, mains rejection and calibration information of the network thermocouple devices
+Labels: enhancement
+GitHub Milestone: none
+Observed State: open
+Observed Labels: enhancement
+Observed Milestone: none
+Last Compared: 2026-11-08T04:44:38Z; remote updated at 2026-11-08T04:44:20Z
+
+#### M16 - Temperature Filter On Linux
+
+Origin: 3bdd4f2 / M16
+Identity History: none
+GitHub Issue: [#15](https://github.com/jeonghanlee/measComp/issues/15)
+Status: Open
+
+##### Summary
+
+The `$(P)$(R)Filter` record writes `TEMPERATURE_FILTER`, which the Windows path passes to `cbTIn()`, but `ulTIn()` has no filter and the Linux path ignores the value, so the setting is accepted and has no effect.
+
+##### Scope
+
+Apply the filter in the driver on Linux by averaging successive readings, following the meaning of the Windows option.
+
+Out of scope: Boards not read through `ulTIn()` and the Windows behavior.
+
+##### Completion Criteria
+
+- With the filter enabled, the published value is the average defined by the Windows behavior; disabled, it is the latest reading.
+- The setting survives a reconnect.
+- A shipped case checks filtered and unfiltered values, and the existing cases pass unchanged.
+- The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
+
+##### Dependencies And Decisions
+
+- None. Priority and scope await an owner decision; the row stays Open until then.
+
+##### Implementation Plan
+
+Plan Status: draft
+Plan Acceptance: none
+Implementation Authorization: none
+Superseded Plan Artifacts: none
+
+1. Implement the change described in Scope in `measCompApp/src/drvMultiFunction.cpp` with the shipped test case named in the Completion Criteria. Verified by T1.
+
+##### Test Plan
+
+| Label | Layer | Method | Environment | Expected Result |
+| --- | --- | --- | --- | --- |
+| T1 | Integration | Run the new shipped case and the existing cases with the README commands. | Common integration environment | The Completion Criteria hold and the existing cases pass. |
+
+##### Verification Results
+
+| Label | Observed At | Environment | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| T1 | Not run | Common integration environment | Pending | none |
+
+##### Closure Evidence
+
+- Found 2026-11-08 by reading the poller and the template; not measured. The exact Windows averaging is taken from the Universal Library documentation before implementation. No plan is accepted yet.
+
+##### GitHub Projection
+
+Title: Make the temperature filter setting take effect on Linux
+Labels: bug
+GitHub Milestone: none
+Observed State: open
+Observed Labels: bug
+Observed Milestone: none
+Last Compared: 2026-11-08T04:44:38Z; remote updated at 2026-11-08T04:44:21Z
