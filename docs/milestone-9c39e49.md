@@ -12,7 +12,7 @@ Remote milestone observed at: 2026-11-08T09:41:22Z; state: open; four open issue
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/2`.
 Baseline commit: 9c39e491e463fac77f15cfcec16aa8b4a97cbf10
 
-Next session entry point: Review and accept the plan of M2 (issue #12) in its detail, the nearest Ready row; then implement it. Post the pending comment on jeonghanlee/uldaq-env#3 that links commit 73a1164. Issues #11 to #15 are assigned to GitHub milestone 2.
+Next session entry point: Obtain the owner's implementation authorization for M2 (issue #12), whose plan is accepted and is the nearest Ready row, then implement it in `tests/TC32.pm`, `tests/reconnect_ioc.cpp`, `measCompApp/src/drvMultiFunction.cpp` and the new `read-error` case. Issues #11 to #15 are assigned to GitHub milestone 2.
 
 ## Scope
 
@@ -132,47 +132,62 @@ A TC32 channel outside the common-mode range makes `ulTIn()` return `ERR_CMR_EXC
 
 ##### Scope
 
-Report a channel's read error when its status changes and once when it returns to normal, keeping the per-channel INVALID status on every poll and the open-thermocouple value.
+Report a thermocouple channel's read error once when its status changes, with the channel number in the line, and once when the channel returns to normal at the same error trace level, keeping the per-channel INVALID status on every poll and the open-thermocouple value. The per-channel state starts over when the port connects and when a channel leaves the thermocouple type.
 
-Out of scope: Connection errors, the open-thermocouple value and other boards' read paths.
+Out of scope: Connection errors, the open-thermocouple value, the other read calls of the poll loop (digital input, counter, analog input and scan status), which M9 tracks, and Windows verification.
 
 ##### Completion Criteria
 
-- A persistent condition produces one line when it starts and one when it ends.
-- The record is INVALID while the condition lasts and recovers afterwards.
+- A persistent condition on a channel produces one error-level line naming the channel when it starts and one error-level line naming the channel when it ends, not one line per poll.
+- The channel's record is INVALID while the condition lasts and recovers its value and severity afterwards.
 - `LAST_ERROR_MESSAGE` names the condition while it lasts.
-- A shipped case drives the condition from the TC32 fixture and counts the lines, and the existing cases pass unchanged.
+- When the port reconnects while the condition lasts, the channel reports it again once.
+- A shipped case drives the condition from the TC32 fixture and counts the lines, it fails on the driver before this change, and the existing cases pass unchanged.
 - The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
 
 ##### Dependencies And Decisions
 
 - None. No work or external gate must complete first.
 - Decision Date: 2026-11-08. The owner assigned this work to the Network thermocouple acquisition milestone, GitHub milestone 2.
+- Decision Date: 2026-11-08. The owner chose one line per channel, each naming its channel, over one device-level line: a condition on all 32 channels prints 32 start lines and 32 end lines once, and the operator sees which channel to inspect.
+- Decision Date: 2026-11-08. The owner chose to change only the temperature read and to register the same pattern in the other poll-loop reads (`DIn`, `CIn`, `AIn` and the scan status calls) as backlog row M9, because the issue and its verification are scoped to the temperature read and each other read needs its own fixture condition.
+- Decision Date: 2026-11-08. The owner chose to print the end line at the error trace level, so that the start and the end appear under the documented trace mask; the existing device-level line "Device returned to normal status" stays at its driver I/O level.
+- Decision Date: 2026-11-08. The owner chose to do this work before M3, as work ordering and not as a behavioral constraint: M3 reads the channels with one `ulTInArray()` call and takes the per-channel result from the -9999 and -7777 values, so the state and the line output of this work are kept apart from the read call, and M3 calls them once per channel.
 
 ##### Implementation Plan
 
-Plan Status: draft
-Plan Acceptance: none
+Plan Status: accepted
+Plan Acceptance: 2026-11-08; accepted by the owner after three third-person and three second-person review passes, with one line per channel, only the temperature read, an error-level end line and M2 before M3.
 Implementation Authorization: none
 Superseded Plan Artifacts: none
 
-1. Implement the change described in Scope in `measCompApp/src/drvMultiFunction.cpp` with the shipped test case named in the Completion Criteria. Verified by T1.
+1. `tests/TC32.pm`: replace the single temperature value that the response repeats for every channel with a per-channel value table, add a persistent common-mode condition for selected channels by returning the value -7777 for them, which the earlier measurement showed ULDAQ reports as the common-mode error (`ERR_CMR_EXCEEDED`), switched on and off while the fixture runs, and describe both in the module's POD. The shipped fixture has neither today, and the existing cases keep one value for all channels. Verified by T1 and T2.
+2. `tests/reconnect_ioc.cpp`: add a command that prints `LAST_ERROR_MESSAGE` read through the public asyn interface, because the test IOC does not load the device template that carries that record. Verified by T1.
+3. `measCompApp/src/drvMultiFunction.cpp`: add one method that takes a channel and its read status, keeps the last status of every temperature channel and decides whether a line is due, apart from the read call. In the temperature loop call it instead of `reportError()`. A changed failure status goes through `reportError()` with the channel number in its text, which also writes `LAST_ERROR_MESSAGE`. The return of a failed channel to normal prints one error-level line directly with `asynPrint()` and leaves `LAST_ERROR_MESSAGE` alone, so a channel that recovers beside a channel that still fails does not replace the message that names the failure; the existing clearing at the end of a poll that is entirely normal stays. Keep `setParamStatus()` on every poll, the open-thermocouple handling and the connection-error path; clear the state when the port connects and when the loop skips a channel because its type is not thermocouple. Verified by T1 and T2.
+4. `tests/test_reconnect.pl`: add the case `read-error`. It switches the condition on for channels 0 and 31, the two channels that have temperature records in the test IOC, counts the driver's lines over a window of at least 5 seconds, which is at least 100 polls at the default 50 ms, requires one start line per channel, INVALID records with the held value, `LAST_ERROR_MESSAGE` naming the condition and no further lines, forces a reconnect while the condition lasts and requires one new start line per channel, then switches the condition off on one channel and requires one end line for it, the other channel still INVALID and `LAST_ERROR_MESSAGE` still naming the condition, and finally switches it off on the other channel and requires its end line and recovered records. The IOC must exit normally. Verified by T1.
+5. `docs/reconnection.md` and `tests/README.md`: describe the once-per-change reporting and its trace level, the new case with its command and duration, its original-behavior control and one negative control for each rule: report on every poll, keep the state across a reconnect, and print the end line through `reportError()`. Add a section "Static checks" to `tests/README.md` that gives the commands for the syntax and POD check of the four Perl files, their usage checks and the module availability check, run on Debian 13 and in the Rocky 8 image, and for the `g++ -fsyntax-only` compile of the changed C++ files in the Rocky 8 image; later work units refer to it. Verified by T2 and T3.
+
+The state reset for a channel that leaves the thermocouple type has no network fixture that changes the channel type, so it is checked by reading the loop only and the result records that limit.
 
 ##### Test Plan
 
 | Label | Layer | Method | Environment | Expected Result |
 | --- | --- | --- | --- | --- |
-| T1 | Integration | Run the new shipped case and the existing cases with the README commands. | Common integration environment | The Completion Criteria hold and the existing cases pass. |
+| T1 | Integration | Run `read-error` three times on the changed driver. Build the driver before this change with the final tests and run the case on it. Build the three negative controls of `tests/README.md` once each. | Common integration environment; the TC32 fixture with the common-mode condition | The Completion Criteria hold in all three runs; the driver before this change fails the line-count assertion; each negative control fails its named assertion. |
+| T2 | Regression | Run the 27 existing cases and the exit loop with the README commands, the Perl checks on Debian 13 and in the Rocky 8 image and the compile of the changed C++ files in the Rocky 8 image with the commands of the README section "Static checks". | Same environment; Perl 5.40.1 and 5.26.3 | All pass with normal IOC exit and their recovery deadlines unchanged. |
+| T3 | Review | Read the changed `docs/reconnection.md` and `tests/README.md` as the operator who sets up the case. | Repository documents | The reporting rule, the trace level, the command, the controls and the static checks are described. |
 
 ##### Verification Results
 
 | Label | Observed At | Environment | Result | Evidence |
 | --- | --- | --- | --- | --- |
 | T1 | Not run | Common integration environment | Pending | none |
+| T2 | Not run | Common integration environment | Pending | none |
+| T3 | Not run | Repository documents | Pending | none |
 
 ##### Closure Evidence
 
-- Measured 2026-11-08 with the shipped harness and the TC32 fixture returning the common-mode sentinel -7777: 3,040 lines in about five seconds, severity INVALID, value held at 22.5. No plan is accepted yet.
+- Measured 2026-11-08 with the shipped harness and a temporary fixture variant returning the common-mode sentinel -7777: 3,040 lines in about five seconds, severity INVALID, value held at 22.5. The temporary variant is not in the repository, and `tests/TC32.pm` has no common-mode condition (read 2026-11-08).
 
 ##### GitHub Projection
 
@@ -213,6 +228,7 @@ Out of scope: USB thermocouple boards, the default poll period and the posting o
 
 - None. No work or external gate must complete first.
 - Decision Date: 2026-11-08. The owner assigned this work to the Network thermocouple acquisition milestone, GitHub milestone 2.
+- Decision Date: 2026-11-08. The owner ordered M2 before M3 as work ordering, not as a behavioral constraint: M2 adds the per-channel value table to `tests/TC32.pm` and a method that keeps each channel's read status and prints its lines, and this work gets each channel's result from the -9999 and -7777 values of one `ulTInArray()` call and passes it to that method.
 
 ##### Implementation Plan
 
@@ -387,6 +403,7 @@ Last Compared: 2026-11-08T05:09:19Z; remote updated at 2026-11-08T05:09:19Z
 | M6 | USB counter poller exit race | Carry-forward | Open | No |  | `drvUSBCTR.cpp` stops its poller before the process exits, as the multifunction driver does; priority and scope are undecided; [detail](#m6---usb-counter-poller-exit-race) |
 | M7 | Generator transport-error handling | Carry-forward | Blocked | No | G1 | A transport error in a generator write disconnects the port and the first error code is kept; the network temperature devices are unchanged; [detail](#m7---generator-transport-error-handling) |
 | M8 | Open-detect result on input type change | Carry-forward | Blocked | No | G1 | A connection error from the open-detect call in the input-type branch disconnects the port; [detail](#m8---open-detect-result-on-input-type-change) |
+| M9 | Persistent errors of the other poll-loop reads | Carry-forward | Open | No |  | The digital input, counter, analog input and scan status reads report a persistent error once per change as the temperature read does, or the owner records that they need not; priority and fixture are undecided; [detail](#m9---persistent-errors-of-the-other-poll-loop-reads) |
 | G1 | USB board for hardware verification | External gate | Open | No |  | A USB board that exercises M7 or M8 is available and its model is recorded; [detail](#g1---usb-board-for-hardware-verification) |
 
 ### Backlog Details
@@ -494,7 +511,7 @@ Superseded Plan Artifacts: none
 
 | Label | Layer | Method | Environment | Expected Result |
 | --- | --- | --- | --- | --- |
-| T1 | Regression | Run the 18 shipped cases and the 8 endpoint cases, the Perl checks on Debian 13 and Rocky 8 and the compile of the changed C++ files on Rocky 8; the cases that use the TC32 and E-TC protocol fixtures are the guard for the network temperature devices. | Common integration environment; Rocky 8 image | All pass with normal IOC exit; the changed files compile on Rocky 8. |
+| T1 | Regression | Run every case of `tests/test_reconnect.pl` and the exit loop with the README commands, and the Perl checks and the compile of the changed C++ files in the Rocky 8 image with the commands of the README section "Static checks"; the cases that use the TC32 and E-TC protocol fixtures are the guard for the network temperature devices. | Common integration environment; Rocky 8 image | All pass with normal IOC exit; the changed files compile on Rocky 8. |
 | T2 | Hardware | Unplug a USB board with a pulse generator or waveform generator while a generator parameter changes and read the port state and log. | A USB board that has the feature (G1) | The port is disconnected and the inputs are marked disconnected. |
 
 ##### Verification Results
@@ -561,7 +578,7 @@ Superseded Plan Artifacts: none
 
 | Label | Layer | Method | Environment | Expected Result |
 | --- | --- | --- | --- | --- |
-| T1 | Regression | Run the 18 shipped cases and the 8 endpoint cases, the Perl checks on Debian 13 and Rocky 8 and the compile of the changed C++ files on Rocky 8; the cases that use the TC32 and E-TC protocol fixtures are the guard for the network temperature devices. | Common integration environment; Rocky 8 image | All pass with normal IOC exit; the changed file compiles on Rocky 8. |
+| T1 | Regression | Run every case of `tests/test_reconnect.pl` and the exit loop with the README commands, and the Perl checks and the compile of the changed C++ files in the Rocky 8 image with the commands of the README section "Static checks"; the cases that use the TC32 and E-TC protocol fixtures are the guard for the network temperature devices. | Common integration environment; Rocky 8 image | All pass with normal IOC exit; the changed file compiles on Rocky 8. |
 | T2 | Hardware | Unplug a USB-2408-2AO while the input type switches from voltage to thermocouple and read the port state and log. | A USB-2408-2AO (G1) | The port is disconnected and the write returns `asynError`. |
 
 ##### Verification Results
@@ -584,6 +601,66 @@ Observed State: open
 Observed Labels: bug
 Observed Milestone: none
 Last Compared: 2026-11-08T02:31:58Z; remote updated at 2026-11-08T02:31:50Z
+
+#### M9 - Persistent Errors Of The Other Poll-Loop Reads
+
+Origin: 9c39e49 / M9
+Identity History: none
+GitHub Issue: none
+Status: Open
+
+##### Summary
+
+The poll loop of `MultiFunction::pollerThread()` calls `reportError()` on every poll for each failing read, not only for the temperature read: `DIn`, `CIn`, `AIn` and the two scan status calls print the same error line on every poll while an error persists (`drvMultiFunction.cpp`, read 2026-11-08). The temperature read is changed under M2; the others were not reproduced, because the TC32 fixture has no condition for them.
+
+##### Scope
+
+Decide whether these reads report a persistent error once per change as M2 does, with which fixture conditions, and whether a shared helper replaces the per-read state.
+
+Out of scope: the temperature read, which M2 changes, and connection errors.
+
+##### Completion Criteria
+
+- The owner decides the priority and scope, and the row is then moved to Not started, Deferred or retired with a dated decision.
+
+##### Dependencies And Decisions
+
+- Decision Date: 2026-11-08. The owner chose to register these reads here and to change only the temperature read under M2.
+
+##### Implementation Plan
+
+Plan Status: draft
+Plan Acceptance: none
+Implementation Authorization: none
+Superseded Plan Artifacts: none
+
+1. After M2, apply the same once-per-change reporting to the reads the owner selects, with a fixture condition and a counted-lines case for each.
+
+##### Test Plan
+
+| Label | Layer | Method | Environment | Expected Result |
+| --- | --- | --- | --- | --- |
+| T1 | Integration | For each selected read, drive a persistent error from the fixture and count the driver's lines. | Common integration environment with a fixture condition for the read | One start line and one end line per read; the driver before the change prints one per poll. |
+
+##### Verification Results
+
+| Label | Observed At | Environment | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| T1 | Not run | Common integration environment | Pending | none |
+
+##### Closure Evidence
+
+- Observed 2026-11-08 while reviewing the plan of M2: the call sites are `reportError()` after `DIn`, `CIn`, `AIn` and the scan status calls in the poll loop.
+
+##### GitHub Projection
+
+Title: none
+Labels: none
+GitHub Milestone: none
+Observed State: none
+Observed Labels: none
+Observed Milestone: none
+Last Compared: never
 
 #### G1 - USB Board For Hardware Verification
 
