@@ -12,7 +12,7 @@ Remote milestone observed at: 2026-11-08T09:41:22Z; state: open; four open issue
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/2`.
 Baseline commit: 9c39e491e463fac77f15cfcec16aa8b4a97cbf10
 
-Next session entry point: Obtain the owner's implementation authorization for M2 (issue #12), whose plan is accepted and is the nearest Ready row, then implement it in `tests/TC32.pm`, `tests/reconnect_ioc.cpp`, `measCompApp/src/drvMultiFunction.cpp` and the new `read-error` case. Issues #11 to #15 are assigned to GitHub milestone 2.
+Next session entry point: Commit the M2 (issue #12) implementation, push it, sync issue #12 with the result and close it, then mark M2 Complete. Issues #11 to #15 are assigned to GitHub milestone 2.
 
 ## Scope
 
@@ -29,12 +29,12 @@ The common integration environment is Linux with the real measComp driver, EPICS
 | ID | Work unit | Type | Status | Ready | Deps | Done when / Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | M1 | Silent device stalls other ports | Carry-forward | Complete | No | | A healthy port keeps polling beside a silent network device; issue #11; [detail](#m1---silent-device-stalls-other-ports) |
-| M2 | Persistent read error logging | Carry-forward | Not started | Yes | | A persistent thermocouple read error is reported once per change; issue #12; [detail](#m2---persistent-read-error-logging) |
+| M2 | Persistent read error logging | Carry-forward | In progress | No | | A persistent thermocouple read error is reported once per change; issue #12; [detail](#m2---persistent-read-error-logging) |
 | M3 | Single-request thermocouple read and acquisition time | Carry-forward | Not started | Yes | | One temperature request per scale group per poll with one acquisition timestamp; issue #13; [detail](#m3---single-request-thermocouple-read-and-acquisition-time) |
 | M4 | Thermocouple device diagnostics | Carry-forward | Not started | Yes | | Cold-junction temperatures, mains rejection and calibration information are exposed; issue #14; [detail](#m4---thermocouple-device-diagnostics) |
 | M5 | Temperature filter on Linux | Carry-forward | Not started | Yes | | The temperature filter takes effect on Linux; issue #15; [detail](#m5---temperature-filter-on-linux) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: one Complete and four Not started. `Ready` records dependency readiness only. No external prerequisite is established for these rows.
+The row order follows issue numbers and imposes no execution dependency. Current status: one Complete, one In progress and three Not started. `Ready` records dependency readiness only. No external prerequisite is established for these rows.
 
 ### Milestone Details
 
@@ -124,7 +124,7 @@ Last Compared: 2026-11-08T09:41:22Z; remote updated at 2026-11-08T09:31:22Z
 Origin: 9c39e49 / M2
 Identity History: none
 GitHub Issue: [#12](https://github.com/jeonghanlee/measComp/issues/12)
-Status: Not started
+Status: In progress
 
 ##### Summary
 
@@ -158,13 +158,13 @@ Out of scope: Connection errors, the open-thermocouple value, the other read cal
 
 Plan Status: accepted
 Plan Acceptance: 2026-11-08; accepted by the owner after three third-person and three second-person review passes, with one line per channel, only the temperature read, an error-level end line and M2 before M3.
-Implementation Authorization: none
+Implementation Authorization: 2026-11-08; implement and verify the accepted plan items 1 to 5.
 Superseded Plan Artifacts: none
 
 1. `tests/TC32.pm`: replace the single temperature value that the response repeats for every channel with a per-channel value table, add a persistent common-mode condition for selected channels by returning the value -7777 for them, which the earlier measurement showed ULDAQ reports as the common-mode error (`ERR_CMR_EXCEEDED`), switched on and off while the fixture runs, and describe both in the module's POD. The shipped fixture has neither today, and the existing cases keep one value for all channels. Verified by T1 and T2.
 2. `tests/reconnect_ioc.cpp`: add a command that prints `LAST_ERROR_MESSAGE` read through the public asyn interface, because the test IOC does not load the device template that carries that record. Verified by T1.
 3. `measCompApp/src/drvMultiFunction.cpp`: add one method that takes a channel and its read status, keeps the last status of every temperature channel and decides whether a line is due, apart from the read call. In the temperature loop call it instead of `reportError()`. A changed failure status goes through `reportError()` with the channel number in its text, which also writes `LAST_ERROR_MESSAGE`. The return of a failed channel to normal prints one error-level line directly with `asynPrint()` and leaves `LAST_ERROR_MESSAGE` alone, so a channel that recovers beside a channel that still fails does not replace the message that names the failure; the existing clearing at the end of a poll that is entirely normal stays. Keep `setParamStatus()` on every poll, the open-thermocouple handling and the connection-error path; clear the state when the port connects and when the loop skips a channel because its type is not thermocouple. Verified by T1 and T2.
-4. `tests/test_reconnect.pl`: add the case `read-error`. It switches the condition on for channels 0 and 31, the two channels that have temperature records in the test IOC, counts the driver's lines over a window of at least 5 seconds, which is at least 100 polls at the default 50 ms, requires one start line per channel, INVALID records with the held value, `LAST_ERROR_MESSAGE` naming the condition and no further lines, forces a reconnect while the condition lasts and requires one new start line per channel, then switches the condition off on one channel and requires one end line for it, the other channel still INVALID and `LAST_ERROR_MESSAGE` still naming the condition, and finally switches it off on the other channel and requires its end line and recovered records. The IOC must exit normally. Verified by T1.
+4. `tests/test_reconnect.pl`: add the case `read-error`. It switches the condition on for channels 0 and 31, the two channels that have temperature records in the test IOC, counts the driver's lines over a window of at least 8 seconds, which holds at least 100 polls at the measured rate of about 19 polls per second, requires one start line per channel, INVALID records with the held value, `LAST_ERROR_MESSAGE` naming the condition and no further lines, forces a reconnect while the condition lasts and requires one new start line per channel, then switches the condition off on one channel and requires one end line for it, the other channel still INVALID and `LAST_ERROR_MESSAGE` still naming the condition, and finally switches it off on the other channel and requires its end line and recovered records. The IOC must exit normally. Verified by T1.
 5. `docs/reconnection.md` and `tests/README.md`: describe the once-per-change reporting and its trace level, the new case with its command and duration, its original-behavior control and one negative control for each rule: report on every poll, keep the state across a reconnect, and print the end line through `reportError()`. Add a section "Static checks" to `tests/README.md` that gives the commands for the syntax and POD check of the four Perl files, their usage checks and the module availability check, run on Debian 13 and in the Rocky 8 image, and for the `g++ -fsyntax-only` compile of the changed C++ files in the Rocky 8 image; later work units refer to it. Verified by T2 and T3.
 
 The state reset for a channel that leaves the thermocouple type has no network fixture that changes the channel type, so it is checked by reading the loop only and the result records that limit.
@@ -181,13 +181,15 @@ The state reset for a channel that leaves the thermocouple type has no network f
 
 | Label | Observed At | Environment | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| T1 | Not run | Common integration environment | Pending | none |
-| T2 | Not run | Common integration environment | Pending | none |
-| T3 | Not run | Repository documents | Pending | none |
+| T1 | 2026-11-09T01:15:19Z to 01:17:17Z | Debian 13; real IOC, Base 7.0.10, asyn 4.45.0, patched ULDAQ 1.2.2; one TC32 fixture with channels 0 and 31 returning -7777 | Pass: `read-error` in three runs on the changed driver (the README command and two more) passes its 13 assertions. In an 8.1-second window of 154 to 157 polls the driver prints 2 error lines, one for channel 0 and one for channel 31, both with error 107 and "Common-mode voltage range exceeded"; the records stay INVALID with 22.5; an injected `bad-size` fault on channel 31 prints a line with error 9 and then a line with error 107; after a forced connection error and reconnect each channel reports once more; the return to normal prints one line per channel and `LAST_ERROR_MESSAGE` keeps naming channel 31 until channel 31 also recovers, then clears. The driver before this change, with the same tests, fails `read error reported once per channel` with 308 lines in 154 polls. The control `read-error-every-poll` fails the same assertion, `read-error-ignores-code-change` fails `a different error on a failing channel is reported again`, `read-error-keeps-state` fails `read error reported again once per channel after reconnect` with one line for channel 31, and `read-error-end-sets-message` fails `LAST_ERROR_MESSAGE keeps naming the failing channel`. The restart of the channel state when a channel leaves the thermocouple type is not exercised, because no fixture changes the channel type; it was checked by reading the loop only. | `work/m2-read-error/r3/`: `block7.out`, `read-error-fixed-*`, `var-*-run` |
+| T2 | 2026-11-09T01:06:16Z to 01:26:00Z | Same environment; Perl 5.40.1 and 5.26.3; Rocky 8 image | Pass: the 14 earlier cases pass 995 assertions, the 4 MAC cases 35, the 8 endpoint cases 45 and `silent-device` 8, with every IOC exit 0 and their recovery deadlines unchanged; the exit loop passes 150 of 150; the commands of the README section "Static checks" pass on the host and in the Rocky 8 image, including both usage checks that print `exit 2`, and `drvMultiFunction.cpp` and `reconnect_ioc.cpp` compile there without error. | `work/m2-read-error/r3/`: `block0.out` to `block6.out`, `loop.out`, `static0.out`, `static1.out` |
+| T3 | 2026-11-08 | Repository documents in the working tree of this verification | Pass: `docs/reconnection.md` describes the once-per-change lines, their trace level, the INVALID records, the `LAST_ERROR_MESSAGE` rule, the restart at a reconnect and the reads that are not covered; `tests/README.md` gives the `read-error` command and its duration of about 25 seconds, the original-behavior control, four negative controls and the Static checks commands. Every command in the text was executed in the run above and the duration was measured at 21 to 22 seconds. | `docs/reconnection.md` section Persistent thermocouple read errors; `tests/README.md` sections Read error case and Static checks |
+
+Source identity of the run: `drvMultiFunction.cpp` SHA-256 `41861dc736de48e1eacbc1e222e8a5ddb1b27fbf6ef4360b1ebe92e32717404a`; `test_reconnect.pl` `3ff52cd40872327435179c330e18e09d4b8434f104565008237c6f5c8b5498e4`; `reconnect_ioc.cpp` `278377dce6b083681ae57be6185ffdcb6c80d6a71d63998761177ca8b860b005`; `TC32.pm` `f80ff25179f1d64d71fcfc78ef5bcee42e472efbe1fcee1ee34a720d2eb287dc`; `E1608.pm` `621e8daa6c1cad55010dcaa381c3f4722913054c83585d60ab3c1d91f791f930`; `build_reconnect.pl` `c9f049c2ba64934b717e0d27b49fcdd0941cfc472c1ef1da0bb993351478a400`; `exit_loop.bash` `5f4a0f6085a08021f94508424297302de8913745de940d53c2d59786f96f9826`; `tests/README.md` `27768c58266ef04a15ae1ce8698d1fa63f6523415d9288fb91eebab074e59c0f`; `docs/reconnection.md` `6a5979e3faa44e0144f24cc10173a236a0c0f44bed1c41dc8de5de3f7ee71d8a`. No source file changed between the start of the run and these hashes, except that the introduction of the README section "Static checks" was reworded afterwards (`tests/README.md` SHA-256 `5b0e2ca3839187e86f205700275f4b7d494ffce6cf20611efa0009ad91f75fc5`); the extracted command blocks of the README, all ten, are byte-identical to the ones the run executed. The overview comment of the case in `tests/test_reconnect.pl` was reworded afterwards too (`test_reconnect.pl` SHA-256 `47e59cb18186b718e3a0658e0508b78d561dfc65fe6cffa180c78e65979b7112`); the difference to the file the run used is those three comment lines only, and `read-error` passed once more on it with 13 of 13 assertions. The driver before this change is the committed `07dc550` `drvMultiFunction.cpp` built with the final tests.
 
 ##### Closure Evidence
 
-- Measured 2026-11-08 with the shipped harness and a temporary fixture variant returning the common-mode sentinel -7777: 3,040 lines in about five seconds, severity INVALID, value held at 22.5. The temporary variant is not in the repository, and `tests/TC32.pm` has no common-mode condition (read 2026-11-08).
+- Measured 2026-11-08 with the shipped harness and a temporary fixture variant returning the common-mode sentinel -7777: 3,040 lines in about five seconds, severity INVALID, value held at 22.5. The temporary variant is not in the repository, and `tests/TC32.pm` has no common-mode condition (read 2026-11-08). The plan assumed a poll every 50 ms; the measured rate with a TC32 fixture is about 19 polls per second, because each poll reads every channel, so the case uses an 8-second window and requires at least 100 polls.
 
 ##### GitHub Projection
 
