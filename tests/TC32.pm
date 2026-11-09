@@ -12,6 +12,7 @@ my $DEFAULT_ADDRESS = '192.0.2.2';
 my $DEFAULT_PORT = 54211;
 my $HEADER_LENGTH = 6;
 my $TIMEOUT_HOLD = 10;
+my $COMMON_MODE_VALUE = -7777;
 
 sub new {
     my ($class, $address, $port, $options) = @_;
@@ -39,7 +40,7 @@ sub new {
         address => $address, port => $port, udp => $udp, tcp => $tcp, broadcast => $broadcast,
         mac => $options->{mac}, discovery_requests => [],
         readers => IO::Select->new($udp, $tcp, $broadcast // ()), clients => {},
-        online => 0, temperature => 22.5, types => chr(1) x 64, measure => "\0\0",
+        online => 0, temperature => 22.5, channel_values => {}, types => chr(1) x 64, measure => "\0\0",
         fault => undef, faults => [], errors => [], connections => 0, requests => 0,
         digital_in => 1, digital_out => [0, 0], traffic => [],
     }, $class;
@@ -83,10 +84,27 @@ sub response {
         my (undef, $scale, $base, $expansion) = unpack('CCVV', $data);
         return $self->reject('driver queried absent EXP-32 channels') if $expansion;
         return $self->reject('unexpected temperature scale') if $scale;
-        my $count = unpack('%32b*', pack('V', $base));
-        return pack('f<', $self->{temperature}) x $count;
+        my @channels = grep { $base & (1 << $_) } 0 .. 31;
+        return join('', map { pack('f<', $self->channel_value($_)) } @channels);
     }
     return $self->reject(sprintf('unknown TCP command 0x%02x', $command));
+}
+
+sub channel_value {
+    my ($self, $channel) = @_;
+    return $self->{channel_values}{$channel} // $self->{temperature};
+}
+
+sub set_common_mode {
+    my ($self, @channels) = @_;
+    $self->{channel_values}{$_} = $COMMON_MODE_VALUE for @channels;
+    return;
+}
+
+sub clear_channel_values {
+    my ($self, @channels) = @_;
+    delete $self->{channel_values}{$_} for @channels;
+    return;
 }
 
 sub reject {
@@ -262,6 +280,6 @@ TC32 - External UDP/TCP TC32 fixture for the reconnect integration test
 
 =head1 DESCRIPTION
 
-Implements the discovery, digital input/output, temperature and configuration frames used by the real ULDAQ library. The fixture models a TC32 without EXP-32 and records unsupported requests as errors. A nonblocking event loop serves the sockets while the test waits for IOC output. EOF, incomplete response headers and receive timeout are injected at the network boundary. The timeout socket remains open for ten seconds after fault injection. The drop fault discards one request without closing the socket; subsequent requests receive normal responses. The bad-size fault returns a complete checksummed response with one unexpected payload byte. Request timestamps, connection numbers, payloads and complete response frames are retained as evidence. The optional third constructor argument is a hash reference. Its C<mac> key sets the six-byte MAC address in the discovery reply. Its C<broadcast> key adds a wildcard UDP listener on the discovery port that records every broadcast discovery request with its monotonic time and replies, while the fixture is online, from the address-bound socket so the reply source is the device address. Broadcast replies are off by default, so cases that select a device by IP address keep their direct descriptor path. Every discovery request, broadcast or addressed, is retained in C<discovery_requests> with its source and online state.
+Implements the discovery, digital input/output, temperature and configuration frames used by the real ULDAQ library. The fixture models a TC32 without EXP-32 and records unsupported requests as errors. A nonblocking event loop serves the sockets while the test waits for IOC output. EOF, incomplete response headers and receive timeout are injected at the network boundary. The timeout socket remains open for ten seconds after fault injection. The drop fault discards one request without closing the socket; subsequent requests receive normal responses. The bad-size fault returns a complete checksummed response with one unexpected payload byte. Request timestamps, connection numbers, payloads and complete response frames are retained as evidence. The temperature response returns the value of the C<temperature> key for every requested channel unless a per-channel value overrides it. C<set_common_mode(@channels)> makes the listed channels return -7777, which ULDAQ reports as the common-mode range error for those channels on every read, and C<clear_channel_values(@channels)> removes the override. The optional third constructor argument is a hash reference. Its C<mac> key sets the six-byte MAC address in the discovery reply. Its C<broadcast> key adds a wildcard UDP listener on the discovery port that records every broadcast discovery request with its monotonic time and replies, while the fixture is online, from the address-bound socket so the reply source is the device address. Broadcast replies are off by default, so cases that select a device by IP address keep their direct descriptor path. Every discovery request, broadcast or addressed, is retained in C<discovery_requests> with its source and online state.
 
 =cut

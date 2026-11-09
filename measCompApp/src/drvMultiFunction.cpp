@@ -758,6 +758,7 @@ private:
   bool connectAllowed_;
   int savedTCType_[MAX_SIGNALS];
   int savedOpenDetect_[MAX_SIGNALS];
+  int tempReadStatus_[MAX_SIGNALS];
   int initializeDevice();
   int restoreTemperatureConfig();
   asynStatus getEnums(int function, const enumStruct_t *&pEnum, int &numEnums);
@@ -841,6 +842,7 @@ private:
   int defineWaveform(int channel);
   int setOpenThermocoupleDetect(int addr, int value);
   int reportError(int err, const char *functionName, const char *message);
+  void reportTemperatureStatus(int channel, int status);
   #ifdef linux
   int mapRange(int Gain, Range *range);
   int mapTriggerType(int cbwTriggerType, TriggerType *triggerType);
@@ -886,6 +888,7 @@ MultiFunction::MultiFunction(const char *portName, const char *uniqueID, int max
   reconnectDelay_ = RECONNECT_DELAY;
   failedConnectAttempts_ = 0;
   connectAllowed_ = false;
+  for (int channel=0; channel<MAX_SIGNALS; channel++) tempReadStatus_[channel] = 0;
   boardType_ = boardFamily_ = 0;
   boardName_[0] = '\0';
   pBoardEnums_ = 0;
@@ -1520,6 +1523,7 @@ asynStatus MultiFunction::connect(asynUser *pasynUser)
     failedConnectAttempts_ = 0;
     enumCallbacksPending_ = true;
     for (int i=0; i<MAX_IO_PORTS; i++) forceCallback_[i] = 1;
+    for (int i=0; i<MAX_SIGNALS; i++) tempReadStatus_[i] = 0;
     ULMutex.unlock();
     setStringParam(lastErrorMessage_, "");
     notifyConnection(true);
@@ -1598,6 +1602,27 @@ int  MultiFunction::reportError(int err, const char *functionName, const char *m
     setStringParam(lastErrorMessage_, messageBuffer);
   }
   return err;
+}
+
+// Reports the read status of a thermocouple channel only when it differs from the previous poll, so a
+// persistent error produces one line when it starts and one when it ends.  A new failure status goes
+// through reportError(), which names the channel and sets LAST_ERROR_MESSAGE; the return to normal is
+// one error-level line that leaves LAST_ERROR_MESSAGE to the failures still present.
+void MultiFunction::reportTemperatureStatus(int channel, int status)
+{
+  static const char *functionName = "pollerThread";
+  if (status == tempReadStatus_[channel]) return;
+  tempReadStatus_[channel] = status;
+  if (status) {
+    char message[64];
+    epicsSnprintf(message, sizeof(message), "Calling TIn channel %d", channel);
+    reportError(status, functionName, message);
+  } else {
+    ULMutex.lock();
+    asynPrint(pasynUserSelf, ASYN_TRACE_ERROR,
+      "%s::%s Channel %d read returned to normal\n", driverName, functionName, channel);
+    ULMutex.unlock();
+  }
 }
 
 #ifdef linux
@@ -3152,7 +3177,10 @@ void MultiFunction::pollerThread()
       for (i=0; i<numTemperatureIn_; i++) {
         getIntegerParam(i, analogInRange_, &range);
         getIntegerParam(i, analogInType_, &type);
-        if (type != AI_CHAN_TYPE_TC) continue;
+        if (type != AI_CHAN_TYPE_TC) {
+          tempReadStatus_[i] = 0;
+          continue;
+        }
         getIntegerParam(i, temperatureScale_, &scale);
         getIntegerParam(i, temperatureFilter_, &filter);
         #ifdef _WIN32
@@ -3192,7 +3220,7 @@ void MultiFunction::pollerThread()
         if (status) {
           inputStatus = status;
           setParamStatus(i, temperatureInValue_, asynError);
-          reportError(status, functionName, "Calling TIn");
+          reportTemperatureStatus(i, status);
           if (isConnectionError(status)) goto error;
           continue;
         }
@@ -3202,6 +3230,7 @@ void MultiFunction::pollerThread()
         // This can only be done by setting the value once to a different value, then the correct value
         setDoubleParam(i, temperatureInValue_, tempValue+1);
         setDoubleParam(i, temperatureInValue_, tempValue);
+        reportTemperatureStatus(i, 0);
         reportError(status, functionName, "Calling TIn");
 
       } // for on channels

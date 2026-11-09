@@ -39,7 +39,7 @@ my %CASES = map { $_ => 1 } qw(reconnect digital-word digital-control digital-po
     bounds-tc32-online bounds-tc32-offline bounds-e1608-online bounds-e1608-offline
     mac-tc32-online mac-tc32-offline mac-two-ports mac-known-absent
     endpoint-same-ip endpoint-mixed endpoint-distinct-ip endpoint-default-port endpoint-alt-port
-    endpoint-hostname endpoint-hostname-port endpoint-wrong-port silent-device);
+    endpoint-hostname endpoint-hostname-port endpoint-wrong-port silent-device read-error);
 my $ALT_DISCOVERY_PORT = 54221;
 my $UNUSED_DISCOVERY_PORT = 54231;
 my $SILENT_ADDRESS = '192.0.2.3';
@@ -49,6 +49,11 @@ my $SILENT_RATIO = 0.8;
 my $SILENT_PAUSE_LIMIT = 4;
 my $SILENT_RECOVERY = 70;
 my $SILENT_RESPACE = 22;
+my @READ_ERROR_CHANNELS = (0, 31);
+my $READ_ERROR_WINDOW = 8;
+my $READ_ERROR_POLLS = 100;
+my $READ_ERROR_CODE = 107;
+my $READ_ERROR_SETTLE = 1;
 my $FIXTURE_HOSTNAME = 'fixture-a';
 my @ANALOG_FIELDS = qw(bounds_status low high raw value slope offset egul eguf udf severity pact linear timestamp);
 my $ANALOG_TOLERANCE = 1e-10;
@@ -107,6 +112,7 @@ sub pump {
             $line =~ s/\s+\z//;
             push @{$run->{lines}}, $line;
             push @{$run->{diagnostics}}, $line if $line =~ /err=\d+/;
+            push @{$run->{driver_lines}}, $line if $line =~ /MultiFunction::/;
         }
     }
     return;
@@ -1011,6 +1017,138 @@ sub exercise_silent {
     return;
 }
 
+# The read-error case switches a persistent common-mode condition on for two channels of a healthy TC32
+# and counts the driver's lines. The records stay INVALID with their held value while the condition
+# lasts, the driver reports each channel once, reports a different error on a failing channel as a new
+# line, reports the condition again after a reconnect, and prints one line when each channel returns to
+# normal without replacing LAST_ERROR_MESSAGE while another still fails.
+sub driver_lines_since {
+    my ($run, $mark) = @_;
+    my $count = scalar @{$run->{driver_lines}};
+    return $mark < $count ? @{$run->{driver_lines}}[$mark .. $count - 1] : ();
+}
+
+sub read_error_starts {
+    my (@lines) = @_;
+    return grep { /Calling TIn.*err=$READ_ERROR_CODE\b/ } @lines;
+}
+
+sub read_error_ends {
+    my (@lines) = @_;
+    return grep { /Channel \d+ read returned to normal/ } @lines;
+}
+
+sub line_channels {
+    my (@lines) = @_;
+    return sort { $a <=> $b } map { /[Cc]hannel (\d+)/ ? ($1) : () } @lines;
+}
+
+sub channel_requests {
+    my ($device, $channel, $from, $to) = @_;
+    return scalar grep {
+        my (undef, undef, $base) = unpack('CCV', pack('H*', $_->{payload}));
+        $_->{command} == 0x12 && $_->{time} >= $from && $_->{time} <= $to && $base == (1 << $channel);
+    } @{$device->{traffic}};
+}
+
+sub last_message {
+    my ($run) = @_;
+    my $line = command($run, 'MESSAGE', 'MESSAGE');
+    $line =~ /\AMESSAGE (-?\d+) ?(.*)\z/ or die "malformed IOC message: $line\n";
+    return {status => 0 + $1, text => $2};
+}
+
+# True when the message text names the common-mode error and its code. The result is a scalar so that
+# a failed match cannot turn into an empty list and shift the arguments of check().
+sub names_condition {
+    my ($text) = @_;
+    return ($text =~ /Common-mode/ && $text =~ /\($READ_ERROR_CODE\)/) ? 1 : 0;
+}
+
+sub exercise_read_error {
+    my ($run) = @_;
+    my $device = $run->{device};
+    read_prefix($run, 'READY');
+    healthy($run, 22.5);
+    my $held = 22.5;
+    my $mark = scalar @{$run->{driver_lines}};
+    my $from = now();
+    $device->set_common_mode(@READ_ERROR_CHANNELS);
+    wait_for($run, sub {
+        my ($state) = @_;
+        return $state->{connected} == 1 && $state->{severity} == 3 && $state->{severity31} == 3;
+    });
+    pause($run, $READ_ERROR_WINDOW);
+    my $to = now();
+    my @lines = driver_lines_since($run, $mark);
+    my @starts = read_error_starts(@lines);
+    my $polls = channel_requests($device, $READ_ERROR_CHANNELS[0], $from, $to);
+    check($run, 'read error window covers many polls', $polls >= $READ_ERROR_POLLS,
+        {polls => $polls, seconds => $to - $from});
+    check($run, 'read error reported once per channel', @starts == @READ_ERROR_CHANNELS,
+        {count => scalar(@starts), lines => [@starts[0 .. ($#starts < 3 ? $#starts : 3)]]});
+    check($run, 'read error lines name their channels',
+        join(',', line_channels(@starts)) eq join(',', @READ_ERROR_CHANNELS), [line_channels(@starts)]);
+    my $state = state($run);
+    check($run, 'read error records stay invalid with their held value', $state->{connected} == 1
+        && $state->{severity} == 3 && $state->{severity31} == 3 && abs($state->{value} - $held) < 0.001
+        && abs($state->{value31} - $held) < 0.001, $state);
+    my $message = last_message($run);
+    check($run, 'LAST_ERROR_MESSAGE names the condition', $message->{status} == 0
+        && names_condition($message->{text}), $message);
+
+    # A different error on a channel that already fails is reported as a new line, and the original
+    # error is reported again when it returns.
+    my $change_mark = scalar @{$run->{driver_lines}};
+    $device->{fault} = [0x12, 'bad-size'];
+    pause($run, $READ_ERROR_SETTLE + 1);
+    my $failing = $READ_ERROR_CHANNELS[1];
+    my @change = grep { /Calling TIn channel $failing, err=/ } driver_lines_since($run, $change_mark);
+    my @codes = map { /err=(\d+)/ ? ($1) : () } @change;
+    check($run, 'a different error on a failing channel is reported again', @codes == 2
+        && $codes[0] != $READ_ERROR_CODE && $codes[1] == $READ_ERROR_CODE, [@change]);
+
+    # A reconnect while the condition lasts starts the per-channel state over.
+    my $reconnect_mark = scalar @{$run->{driver_lines}};
+    $device->{fault} = [0x12, 'eof'];
+    wait_for($run, sub { my ($observed) = @_; return $observed->{connected} == 0; });
+    $device->{online} = 1;
+    wait_for($run, sub { my ($observed) = @_; return $observed->{connected} == 1 && $observed->{severity} == 3; });
+    pause($run, $READ_ERROR_SETTLE + 2);
+    my @again = read_error_starts(driver_lines_since($run, $reconnect_mark));
+    check($run, 'read error reported again once per channel after reconnect', @again == @READ_ERROR_CHANNELS
+        && join(',', line_channels(@again)) eq join(',', @READ_ERROR_CHANNELS),
+        {count => scalar(@again), channels => [line_channels(@again)]});
+
+    # One channel returns to normal while the other still fails.
+    my $end_mark = scalar @{$run->{driver_lines}};
+    $device->clear_channel_values($READ_ERROR_CHANNELS[0]);
+    wait_for($run, sub { my ($observed) = @_; return $observed->{severity} == 0 && $observed->{severity31} == 3; });
+    pause($run, $READ_ERROR_SETTLE);
+    my @first_end = read_error_ends(driver_lines_since($run, $end_mark));
+    $message = last_message($run);
+    check($run, 'first channel reports its return to normal once', @first_end == 1
+        && join(',', line_channels(@first_end)) eq $READ_ERROR_CHANNELS[0], \@first_end);
+    check($run, 'LAST_ERROR_MESSAGE keeps naming the failing channel', names_condition($message->{text}),
+        $message);
+
+    # The other channel returns to normal and the message clears.
+    $device->clear_channel_values($READ_ERROR_CHANNELS[1]);
+    healthy($run, 22.5);
+    pause($run, $READ_ERROR_SETTLE);
+    my @all_ends = read_error_ends(driver_lines_since($run, $end_mark));
+    $message = last_message($run);
+    check($run, 'each channel reports its return to normal once', @all_ends == @READ_ERROR_CHANNELS
+        && join(',', line_channels(@all_ends)) eq join(',', @READ_ERROR_CHANNELS), \@all_ends);
+    check($run, 'LAST_ERROR_MESSAGE clears when every channel is normal', $message->{status} == 0
+        && $message->{text} eq '', $message);
+    check($run, 'read error fixture commands supported', !@{$device->{errors}}, $device->{errors});
+    print {$run->{input}} "QUIT\n" or die "IOC input write: $!\n";
+    wait_exit($run, $EXIT_TIMEOUT) or die "IOC exit deadline exceeded\n";
+    check($run, 'read error IOC exits normally', $run->{ioc_exit} == 0, $run->{ioc_exit});
+    return;
+}
+
 sub digital_window {
     my ($run) = @_;
     my $device = $run->{device};
@@ -1316,7 +1454,7 @@ sub main {
     pod2usage(-exitval => 2, -message => "Unknown case: $case") unless $CASES{$case};
     pod2usage(-exitval => 2, -message => 'Expected IOC, DBD, template and log paths') unless @args == 4;
     my ($executable, $dbd, $template, $log_path) = @args;
-    my $run = {checks => [], lines => [], diagnostics => [], buffer => '',
+    my $run = {checks => [], lines => [], diagnostics => [], driver_lines => [], buffer => '',
         log_path => $log_path, ioc_exit => undef, case => $case};
     open($run->{log}, '>:raw', $log_path) or die "$log_path: $!\n";
     $run->{log}->autoflush(1);
@@ -1326,6 +1464,7 @@ sub main {
         if ($case =~ /\Amac-/) { setup_mac($run); }
         elsif ($case =~ /\Aendpoint-/) { setup_endpoint($run); }
         elsif ($case eq 'silent-device') { setup_silent($run); }
+        elsif ($case eq 'read-error') { $run->{device} = TC32->new(); $run->{device}{online} = 1; }
         else { $run->{device} = ($run->{model} // '') eq 'e1608' ? E1608->new() : TC32->new(); }
         $run->{device}{online} = 1 if $case =~ /-online\z/;
         launch_ioc($run, $executable, $dbd, $template);
@@ -1334,6 +1473,7 @@ sub main {
         elsif ($case eq 'mac-known-absent') { exercise_mac_known($run); }
         elsif ($case =~ /\Aendpoint-/) { exercise_endpoint($run); }
         elsif ($case eq 'silent-device') { exercise_silent($run); }
+        elsif ($case eq 'read-error') { exercise_read_error($run); }
         elsif ($case =~ /\Amac-/) { exercise_mac($run); }
         elsif ($run->{model}) { exercise_enums($run); }
         elsif ($case eq 'reconnect') { exercise($run); }
@@ -1381,7 +1521,7 @@ Print usage and exit successfully.
 
 =item --case NAME
 
-Select reconnect (default), digital-word, digital-control, digital-policy, digital-bits, enum-tc32-online, enum-tc32-offline, enum-e1608-online, enum-e1608-offline, enum-e1608-init, bounds-tc32-online, bounds-tc32-offline, bounds-e1608-online, bounds-e1608-offline, mac-tc32-online, mac-tc32-offline, mac-two-ports, mac-known-absent, endpoint-same-ip, endpoint-mixed, endpoint-distinct-ip, endpoint-default-port, endpoint-alt-port, endpoint-hostname, endpoint-hostname-port, endpoint-wrong-port or silent-device. Each invocation creates a fresh IOC and its external fixtures.
+Select reconnect (default), digital-word, digital-control, digital-policy, digital-bits, enum-tc32-online, enum-tc32-offline, enum-e1608-online, enum-e1608-offline, enum-e1608-init, bounds-tc32-online, bounds-tc32-offline, bounds-e1608-online, bounds-e1608-offline, mac-tc32-online, mac-tc32-offline, mac-two-ports, mac-known-absent, endpoint-same-ip, endpoint-mixed, endpoint-distinct-ip, endpoint-default-port, endpoint-alt-port, endpoint-hostname, endpoint-hostname-port, endpoint-wrong-port, silent-device or read-error. Each invocation creates a fresh IOC and its external fixtures.
 
 Enum cases compare all record enum states with public driver reads and model-specific expected values, write every supported selection through the record, and check RVAL, SDEF, asynchronous completion, alarm severity and public driver readback. They repeat two transport failures and reconnects. The init case holds the real IOC after record initialization, enables device responses, proves connection while interruptAccept is zero, and resumes IOC initialization.
 
@@ -1392,6 +1532,8 @@ MAC cases select each TC32 fixture by MAC address, so the real driver finds it t
 Endpoint cases select devices by IP address, discovery port, hostname or MAC and require every port to read its own device with a single connection per fixture. endpoint-same-ip runs two fixtures at one IP address on discovery ports 54211 and 54221; endpoint-mixed selects the first of them by MAC through broadcast discovery and the second by IP address and port 54221; endpoint-distinct-ip runs two fixtures at distinct addresses. endpoint-default-port selects a broadcast-discovered device with an explicit default port and requires one inventory entry; endpoint-alt-port runs one fixture on port 54221; endpoint-hostname selects one fixture by a name that the namespace resolves through a bind-mounted hosts file and requires the resolved address in the inventory; endpoint-hostname-port selects a fixture on port 54221 by that name and port. endpoint-wrong-port names a discovery port nobody listens on and requires the port to stay disconnected with an empty inventory.
 
 The silent-device case runs a healthy TC32 port beside a second TC32 whose address is removed from the namespace after it has connected, so its packets are dropped without a reset. It compares the healthy port's requests in a 40-second window that begins 25 seconds after the removal with a 40-second window measured before it, requires at least 80 percent of that count and no pause longer than 4 seconds, then restores the address and requires the second port to reconnect with its own value within 70 seconds. A second outage of 22 seconds, long enough for the interval to be spaced, ends with the address restored and the second port disabled and enabled again, which must reconnect it within 12 seconds. It needs the network namespace of the other cases and the ip command.
+
+The read-error case switches a persistent common-mode condition on for channels 0 and 31 of a healthy TC32 and counts the driver's lines over an 8-second window of at least 100 polls. It requires one error line per channel that names the channel, INVALID records with their held value and LAST_ERROR_MESSAGE naming the condition. It injects a different error on channel 31 while its condition lasts and requires a new line for that error and another when the common-mode error returns. It forces a reconnect while the condition lasts and requires one new line per channel, switches the condition off on channel 0 and requires one line for its return to normal with the message unchanged, then off on channel 31, and requires its line and a cleared message.
 
 =back
 

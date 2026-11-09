@@ -7,6 +7,7 @@
 #include <asynInt32.h>
 #include <asynInt32SyncIO.h>
 #include <asynFloat64SyncIO.h>
+#include <asynOctetSyncIO.h>
 #include <asynUInt32Digital.h>
 #include <asynUInt32DigitalSyncIO.h>
 #include <asynEnumSyncIO.h>
@@ -145,6 +146,22 @@ static void putNumber(const char *name, double value)
         dbScanUnlock(address.precord);
     }
     std::printf("RESULT %ld %.17g\n", status, actual);
+}
+
+// Prints the driver's LAST_ERROR_MESSAGE parameter, read through the public asynOctet interface.
+static void readMessage()
+{
+    asynUser *user = 0;
+    char buffer[256] = "";
+    size_t received = 0;
+    int eomReason = 0;
+    asynStatus status = pasynOctetSyncIO->connect("DAQ", 0, &user, "LAST_ERROR_MESSAGE");
+    if (status == asynSuccess) {
+        status = pasynOctetSyncIO->read(user, buffer, sizeof(buffer) - 1, 2.0, &received, &eomReason);
+        buffer[received < sizeof(buffer) ? received : sizeof(buffer) - 1] = '\0';
+        pasynOctetSyncIO->disconnect(user);
+    }
+    std::printf("MESSAGE %d %s\n", status, buffer);
 }
 
 static void readAnalog(int addr, const char *record)
@@ -334,6 +351,7 @@ int main(int argc, char **argv)
             std::printf("RESULT %d\n", writeSetting("THERMOCOUPLE_OPEN_DETECT", value, 31));
         else if (std::sscanf(command, "OTD %d", &value) == 1)
             std::printf("RESULT %d\n", writeSetting("THERMOCOUPLE_OPEN_DETECT", value));
+        else if (!std::strncmp(command, "MESSAGE", 7)) readMessage();
         else if (!std::strncmp(command, "QUIT", 4)) break;
         else std::puts("UNKNOWN");
     }

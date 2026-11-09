@@ -390,6 +390,40 @@ root. It must fail `silent healthy port keeps polling`, because a five-second
 retry of a silent device leaves the healthy port 70 to 74 percent of the
 control's requests in the measured window, below the 80 percent threshold.
 
+## Read error case
+
+`read-error` runs a healthy TC32 and switches a persistent common-mode
+condition on for channels 0 and 31, the two channels with temperature records
+in the test IOC. The fixture returns -7777 for them, which ULDAQ reports as
+error 107 on every read. Over an 8-second window of at least 100 polls it
+requires one error line per channel that names the channel, records that stay
+INVALID with their held value, and `LAST_ERROR_MESSAGE` naming the condition.
+It then injects a different error on channel 31 while its condition lasts
+and requires one new line for that error and one when the common-mode error
+returns. It forces a connection error and requires one new line per channel
+after the reconnect. It switches the condition off on
+channel 0 and requires one line for its return to normal with the message
+still naming the failure of channel 31, then off on channel 31 and requires
+its line and a cleared message. The IOC must then exit normally. The case
+takes about 25 seconds. It needs no extra address, so it runs in the
+namespace shell of the other cases:
+
+```bash
+export TEMPLATE="$PWD/measCompApp/Db/measCompTemperatureIn.template"
+export IOC="$BUILD/reconnect-ioc"
+export DBD="$BUILD/reconnect.dbd"
+export RUNNER="$PWD/tests/test_reconnect.pl"
+timeout 120s perl "$RUNNER" --case read-error "$IOC" "$DBD" "$TEMPLATE" "$BUILD/read-error.log"
+exit
+```
+
+For the original-behavior control, build a scratch copy whose
+`measCompApp/src/drvMultiFunction.cpp` is the version from before the
+once-per-change reporting, as described for the MAC cases, and run the same
+command from its root. It must fail `read error reported once per channel`,
+because that driver prints an error line on every poll for every failing
+channel, hundreds of lines in the window instead of two.
+
 ## Exit loop
 
 The driver stops and joins each port's poller thread in an exit handler, so
@@ -425,6 +459,33 @@ handler, as described for the MAC cases, build it with its own `BUILD`, and run
 the same commands from the root of the scratch copy. A clean result there does
 not prove the absence of the race, only a failing run proves its presence.
 
+## Static checks
+
+Run these from this repository root. The Perl checks cover the four Perl
+files of the test, their usage messages and the modules they load; the
+compile checks cover the C++ files that the test builds. Run the Perl checks
+on the host and, with the repository mounted read-only, in the image of the
+Rocky 8 build environment, `jeonghanlee/rocky8-epics:1.2.2` (EPICS Base
+7.0.10, asyn 4.45 and ULDAQ headers). The host commands need `podchecker`,
+which Debian's `perl` package provides, and the Rocky 8 commands need Docker
+and that image. The last two Perl commands must print `exit 2`. Every other
+command must print no error; the compile prints deprecation warnings about
+`rset`, which are expected.
+
+```bash
+for f in test_reconnect.pl build_reconnect.pl TC32.pm E1608.pm; do perl -I tests -wc tests/$f; podchecker tests/$f; done
+for m in Cwd Digest::SHA File::Path File::Spec FindBin Getopt::Long JSON::PP Pod::Usage POSIX Time::HiRes Errno File::Basename IO::Handle IO::Select Scalar::Util IO::Socket::INET Socket; do perl -M$m -e1 || echo "missing $m"; done
+perl tests/test_reconnect.pl --help
+perl tests/build_reconnect.pl --help
+perl tests/test_reconnect.pl --case invalid; echo "exit $?"
+env -u BASE -u ASYN -u BUILD -u ULDAQ_INCLUDE -u ULDAQ_LIB perl tests/build_reconnect.pl; echo "exit $?"
+```
+
+```bash
+docker run --rm --network none -v "$PWD":/w:ro jeonghanlee/rocky8-epics:1.2.2 bash -c 'cd /w && for f in test_reconnect.pl build_reconnect.pl TC32.pm E1608.pm; do perl -I tests -wc tests/$f; podchecker tests/$f; done'
+docker run --rm --network none -v "$PWD":/w:ro jeonghanlee/rocky8-epics:1.2.2 bash -c 'B=/opt/epics/1.2.2/rocky-8.10/7.0.10; for f in measCompApp/src/drvMultiFunction.cpp tests/reconnect_ioc.cpp; do g++ -Wall -Wextra -fsyntax-only -Wno-write-strings -Wno-unused-parameter -I$B/base/include -I$B/base/include/os/Linux -I$B/base/include/compiler/gcc -I$B/modules/asyn-4.45.0/include -I$B/vendor/include -I/w/measCompApp/src /w/$f; done'
+```
+
 ## Negative controls
 
 Apply each change separately to a scratch copy of the named source, rebuild
@@ -459,6 +520,10 @@ driver defect.
 | `endpoint-no-default-port` | Record port 0 instead of the default discovery port for broadcast-discovered entries | `endpoint broadcast-discovered device is not queried again` in `endpoint-default-port`; the inventory stays correct because the direct query's result is matched by MAC, and `endpoint-mixed` is unaffected because a MAC selector never reaches the address lookup |
 | `silent-retry-unspaced` | Keep the five-second interval after every failed connection attempt | `silent healthy port keeps polling` in `silent-device` |
 | `silent-enable-keeps-spacing` | Do not reset the interval when the port or auto-connect is enabled again | `silent second port reconnects promptly after it is enabled again` in `silent-device` |
+| `read-error-every-poll` | Report a repeated failure status of a thermocouple channel on every poll | `read error reported once per channel` in `read-error` |
+| `read-error-ignores-code-change` | Compare only whether the status is zero, not its value, when deciding to report a channel | `a different error on a failing channel is reported again` in `read-error` |
+| `read-error-keeps-state` | Do not clear the per-channel read status when the port connects | `read error reported again once per channel after reconnect` in `read-error` |
+| `read-error-end-sets-message` | Set `LAST_ERROR_MESSAGE` when a channel returns to normal | `LAST_ERROR_MESSAGE keeps naming the failing channel` in `read-error` |
 
 This test does not establish hardware power-cycle behavior, sustained network
 loss endurance, Channel Access client reconnection, EXP-32, USB or Windows support.

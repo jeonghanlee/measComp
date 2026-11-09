@@ -183,6 +183,22 @@ not remove the blocking. These limits remain and need changes in ULDAQ:
   unprotected; with a protected registry a silent device would no longer
   block the other ports at all.
 
+## Persistent thermocouple read errors
+
+When a thermocouple channel keeps returning the same error, as a TC32 channel
+outside its common-mode input range does on every read, the driver prints one
+error line that names the channel when the error starts and one line when the
+channel reads normally again, not one line per poll. A different error on the
+same channel prints a new line. Both lines use the error trace level, which
+the trace mask shown above keeps enabled. The channel's record stays INVALID
+with its last value for as long as the error lasts. `LAST_ERROR_MESSAGE`
+names the latest failure; a channel that recovers while another still fails
+does not replace it, and it clears once every channel reads normally. A
+reconnect starts the channel state over, so an error that is still present is
+reported once more. Only the thermocouple read is reported this way: the
+digital, counter, analog input and scan status reads of the poll loop still
+print their error on every poll.
+
 ## Linux vendor dependency
 
 Linux builds require ULDAQ 1.2.2 with the TCP receive patch maintained by
@@ -242,6 +258,10 @@ The silent-device case removes the address of a second TC32 after it has
 connected and checks that the healthy port keeps polling, that the silent port
 reconnects after the address returns, and that enabling it again after a spaced
 outage retries promptly.
+The read-error case switches a common-mode condition on for two channels of a
+TC32 and counts the driver's lines, checks the records and
+`LAST_ERROR_MESSAGE`, a different error on a failing channel, a reconnect while
+the condition lasts, and the return to normal of each channel.
 Real hardware power cycling, physical ADC calibration, analog output
 voltage, scan acquisition, EXP-32, USB, Windows and other models require
 separate verification.
