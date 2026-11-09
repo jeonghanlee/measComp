@@ -12,7 +12,7 @@ Remote milestone observed at: 2026-11-09T08:55:32Z; state: open; three open issu
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/2`.
 Baseline commit: 9c39e491e463fac77f15cfcec16aa8b4a97cbf10
 
-Next session entry point: Review and accept the revised plan of M3 (issue #13) in its detail, the nearest Ready row; it reuses `MultiFunction::reportTemperatureStatus()` and the per-channel values of `tests/TC32.pm`. Issues #11 to #15 are assigned to GitHub milestone 2.
+Next session entry point: Commit the M3 (issue #13) implementation, push it, sync issue #13 with the narrowed TC32 scope and the result and close it, then mark M3 Complete. Issues #11 to #15 are assigned to GitHub milestone 2.
 
 ## Scope
 
@@ -30,11 +30,11 @@ The common integration environment is Linux with the real measComp driver, EPICS
 | --- | --- | --- | --- | --- | --- | --- |
 | M1 | Silent device stalls other ports | Carry-forward | Complete | No | | A healthy port keeps polling beside a silent network device; issue #11; [detail](#m1---silent-device-stalls-other-ports) |
 | M2 | Persistent read error logging | Carry-forward | Complete | No | | A persistent thermocouple read error is reported once per change; issue #12; [detail](#m2---persistent-read-error-logging) |
-| M3 | Single-request thermocouple read and acquisition time | Carry-forward | Not started | Yes | | One temperature request per scale group per poll with one acquisition timestamp; issue #13; [detail](#m3---single-request-thermocouple-read-and-acquisition-time) |
+| M3 | Single-request thermocouple read and acquisition time | Carry-forward | In progress | No | | One temperature request per scale group per poll with one acquisition timestamp; issue #13; [detail](#m3---single-request-thermocouple-read-and-acquisition-time) |
 | M4 | Thermocouple device diagnostics | Carry-forward | Not started | Yes | | Cold-junction temperatures, mains rejection and calibration information are exposed; issue #14; [detail](#m4---thermocouple-device-diagnostics) |
 | M5 | Temperature filter on Linux | Carry-forward | Not started | Yes | | The temperature filter takes effect on Linux; issue #15; [detail](#m5---temperature-filter-on-linux) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: two Complete and three Not started. `Ready` records dependency readiness only. No external prerequisite is established for these rows.
+The row order follows issue numbers and imposes no execution dependency. Current status: two Complete, one In progress and two Not started. `Ready` records dependency readiness only. No external prerequisite is established for these rows.
 
 ### Milestone Details
 
@@ -193,7 +193,7 @@ Source identity of the run: `drvMultiFunction.cpp` SHA-256 `41861dc736de48e1eacb
 
 - Landed: observed 2026-11-09T08:55:32Z after `git fetch`, `origin/site` is at commit 484166964308df93d2b98a5dffd27e5ca668c485, the same commit as the local `HEAD`, and the six paths changed by the implementation commit af3a71d (`measCompApp/src/drvMultiFunction.cpp`, `tests/TC32.pm`, `tests/reconnect_ioc.cpp`, `tests/test_reconnect.pl`, `tests/README.md`, `docs/reconnection.md`) show no difference between that commit and `origin/site`. Recheck with `git diff af3a71d origin/site -- <path>`.
 - Issue: the owner delegated the issue operations on 2026-11-09; the body was synchronized with the implemented behavior and its five acceptance criteria were checked, a closing comment was posted and issue #12 was closed as completed at 2026-11-09T08:52:13Z. The read-back shows state CLOSED, label bug and milestone 2.
-- Remaining behavior: the other reads of the poll loop (digital input, counter, analog input and scan status) still print an error on every poll; row M9 tracks them. The value -8888, which a single-channel `ulTIn()` passes as a reading instead of an error, belongs to the sentinel handling of M3.
+- Remaining behavior: the other reads of the poll loop (digital input, counter, analog input and scan status) still print an error on every poll; row M9 tracks them. The device value -8888 means an open thermocouple: ULDAQ turns it into the data value -9999 with `ERR_OPEN_CONNECTION`, and the driver already reports -9999 without an error (read in the ULDAQ 1.2.2 source 2026-11-09).
 
 ##### GitHub Projection
 
@@ -210,7 +210,7 @@ Last Compared: 2026-11-09T08:55:32Z; remote updated at 2026-11-09T08:52:13Z
 Origin: 9c39e49 / M3
 Identity History: none
 GitHub Issue: [#13](https://github.com/jeonghanlee/measComp/issues/13)
-Status: Not started
+Status: In progress
 
 ##### Summary
 
@@ -218,48 +218,69 @@ The poller reads the TC32 and E-TC one channel per `ulTIn()`, which ULDAQ implem
 
 ##### Scope
 
-Read each poll with `ulTInArray()` grouped by temperature scale, take per-channel results from the -9999 and -7777 values the call fills in before returning a range-wide status, and call `updateTimeStamp()` once after the read.
+Read the thermocouple channels of the network TC32 (board type `ETH_TC32`) with `ulTInArray()` over each contiguous run of channels that share a temperature scale, one request per run per poll. Take each channel's result from the values the call fills in (-7777 for a common-mode error, -9999 for an open thermocouple, -11111 for a disabled channel) and pass it to the per-channel status method added for persistent read error logging. Call `updateTimeStamp()` once per poll so every channel carries the acquisition time, and add a `TSE` macro with the default 0 to `measCompTemperatureIn.template`.
 
-Out of scope: USB thermocouple boards, the default poll period and the posting of unchanged values.
+Out of scope: The E-TC device, which keeps its per-channel reads and is registered as row M10, USB thermocouple boards, the default poll period, the posting of unchanged values and Windows.
 
 ##### Completion Criteria
 
-- One temperature request per scale group per poll on the TC32 and E-TC fixtures, counted from the fixture traffic.
-- All channels of a poll carry one timestamp, usable with `TSE=-2`.
-- Open and out-of-range channels are handled per channel without affecting the others.
-- Per-channel scales keep their values, and the existing cases pass unchanged.
+- With all channels at one scale, one poll of the TC32 fixture issues one temperature request, counted from the fixture traffic against the digital read of the same poll. With channel 0 at Fahrenheit and channel 31 at Kelvin it issues three, for channel 0, channels 1 to 30 and channel 31.
+- The channels keep their values in their own scales: 22.5 C reads 72.5 on the Fahrenheit channel and 295.65 on the Kelvin channel.
+- A record with `TSE=-2` takes the timestamp of its poll: the timestamp lies within two seconds of the current time, advances from one poll to the next, and is the same for the records of different channels in one poll.
+- Within one request an open channel reads -9999 and stays valid, a common-mode channel is INVALID with its held value and a disabled channel reads -11111, without changing the other channels of the request.
+- A transport error of a request fails every channel of that request, and a connection error disconnects the port as before.
+- The `TSE` macro of the temperature template defaults to 0 and leaves the timestamp source of existing records unchanged.
+- A shipped case checks these points and fails on the driver before this change, and the 28 existing cases pass with only the request selection of the fixture and the harness adapted.
 - The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
 
 ##### Dependencies And Decisions
 
 - None. No work or external gate must complete first.
 - Decision Date: 2026-11-08. The owner assigned this work to the Network thermocouple acquisition milestone, GitHub milestone 2.
-- Decision Date: 2026-11-08. The owner ordered M2 before M3 as work ordering, not as a behavioral constraint: M2 adds the per-channel value table to `tests/TC32.pm` and a method that keeps each channel's read status and prints its lines, and this work gets each channel's result from the -9999 and -7777 values of one `ulTInArray()` call and passes it to that method.
+- Decision Date: 2026-11-08. The owner ordered M2 before M3 as work ordering, not as a behavioral constraint: M2 added the per-channel value table to `tests/TC32.pm` and the method `reportTemperatureStatus()`, and this work gets each channel's result from the values of one `ulTInArray()` call and passes it to that method.
+- Decision Date: 2026-11-09. The owner chose to change the TC32 only and to keep the E-TC on its per-channel reads, because no E-TC protocol fixture exists and a change that no test can exercise would ship unverified; the E-TC is registered as row M10 and the scope of the linked issue is narrowed to the TC32 when it is closed.
+- Decision Date: 2026-11-09. The owner chose that only the network TC32 uses `ulTInArray()` and the USB boards keep `ulTIn()` for each channel, because the scope excludes USB thermocouple boards and no USB board is available for verification.
+- Decision Date: 2026-11-09. The owner chose to add a `TSE` macro with the default 0 to the temperature template, so that a user can set `TSE=-2` in a database; without it the acquisition time could not be used.
 
 ##### Implementation Plan
 
-Plan Status: draft
-Plan Acceptance: none
-Implementation Authorization: none
+Plan Status: accepted
+Plan Acceptance: 2026-11-09; accepted by the owner after two third-person and one second-person review passes, with the TC32 only, the USB boards unchanged and a `TSE` macro with the default 0.
+Implementation Authorization: 2026-11-09; implement and verify the accepted plan items 1 to 6.
 Superseded Plan Artifacts: none
 
-1. Implement the change described in Scope in `measCompApp/src/drvMultiFunction.cpp` with the shipped test case named in the Completion Criteria. Verified by T1.
+1. `tests/TC32.pm`: select the temperature fault on a request whose channel mask includes channel 31, not only on the mask `0x80000000` of a one-channel request, add `set_open(@channels)` and `set_disabled(@channels)` that return the device values -8888 and -9999 for the channels, and describe them in the POD. The existing cases keep their faults. Verified by T1 and T2.
+2. `tests/reconnect_ioc.cpp`: load the temperature records of channels 0 and 31 and a third record for channel 1 with `TSE=-2`, and add a command that prints the value, severity, validity and timestamp of a record by name. The third record lets one request show an open, a common-mode and a disabled channel together. Verified by T1.
+3. `tests/test_reconnect.pl`: change `channel_requests` of the `read-error` case and the end-of-poll request selection of `digital_window` to select the requests whose mask includes the channel, and add the case `temperature-array`. It counts the temperature requests of polls with all channels at one scale, then with channel 0 at Fahrenheit and channel 31 at Kelvin and checks the three masks and the converted values; requires the timestamp of each record to lie within two seconds of the current time and to advance between two polls, and the records of one poll to share it, so that a driver that never calls `updateTimeStamp()` fails; and switches an open channel 0, a common-mode channel 31 and a disabled channel 1 on in one request and requires -9999 valid, INVALID with the held value and -11111, with the other channels unchanged. It then forces a transport error on the temperature request and requires every channel to fail and the port to recover. The IOC must exit normally. Verified by T1.
+4. `measCompApp/src/drvMultiFunction.cpp`: for board type `ETH_TC32` read each contiguous run of one scale with `ulTInArray()` and map the data values to a status for each channel: -7777 to `ERR_CMR_EXCEEDED`, -9999 to a valid reading of -9999 and -11111 to a plain value. Pass each channel's status to `reportTemperatureStatus()`. A call that fails for another reason fails every channel of the run, and a connection error leaves through the existing disconnect path. Call `updateTimeStamp()` once per poll before the callbacks. Keep the `ulTIn()` loop for the other boards, the forced callback, `setParamStatus()` and the meaning of `status` and `inputStatus`. Verified by T1 and T2.
+5. `measCompApp/Db/measCompTemperatureIn.template`: add `field(TSE, "$(TSE=0)")` to the temperature record. Verified by T1 and T2.
+6. `docs/reconnection.md` and `tests/README.md`: describe the single request per run of one scale, the per-channel meaning of the three device values, the acquisition time and the `TSE` macro, the new case with its command and duration, its original-behavior control and one negative control for each rule: one request per channel, no timestamp, the result taken from the call status, and one scale for all channels. Verified by T3.
+
+The E-TC and USB paths are not changed and no test exercises them, so their unchanged behavior is checked by reading the diff only and the result records that limit.
 
 ##### Test Plan
 
 | Label | Layer | Method | Environment | Expected Result |
 | --- | --- | --- | --- | --- |
-| T1 | Integration | Run the new shipped case and the existing cases with the README commands. | Common integration environment | The Completion Criteria hold and the existing cases pass. |
+| T1 | Integration | Run `temperature-array` three times on the changed driver. Build the driver before this change with the final tests and run the case on it. Build the four negative controls of `tests/README.md` once each. | Common integration environment; the TC32 fixture with per-channel values | The Completion Criteria hold in all three runs; the driver before this change fails the request-count assertion; each negative control fails its named assertion. |
+| T2 | Regression | Run the 28 existing cases and the exit loop with the README commands, the Perl checks and the compile of the changed C++ files with the commands of the README section "Static checks". | Same environment; Perl 5.40.1 and 5.26.3 | All pass with normal IOC exit and their recovery deadlines unchanged. |
+| T3 | Review | Read the changed `docs/reconnection.md` and `tests/README.md` as the operator who sets up the case. | Repository documents | The request rule, the device values, the acquisition time, the `TSE` macro, the command and the controls are described. |
 
 ##### Verification Results
 
 | Label | Observed At | Environment | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| T1 | Not run | Common integration environment | Pending | none |
+| T1 | 2026-11-09T17:16:54Z to 17:23:53Z | Debian 13; real IOC, Base 7.0.10, asyn 4.45.0, patched ULDAQ 1.2.2; one TC32 fixture with per-channel values | Pass: `temperature-array` in three runs on the changed driver (the README command and two more) passes its 19 assertions. With all channels at one scale a poll issues one temperature request with the mask `ffffffff` (58 to 59 polls and requests in the 3-second window); with channel 0 at Fahrenheit and channel 31 at Kelvin it issues three, with the masks `00000001`, `7ffffffe` and `80000000` (59 polls, 177 requests); the records read 72.5 and 295.65; the records of one poll share a timestamp, it lies within two seconds of the current time and advances by 1.01 seconds per second; the `TSE` field is 0 for the record loaded without the macro and -2 for the record that sets it; in one request the open channel reads -9999 valid, the disabled channel -11111 and the common-mode channel is INVALID with 22.5, and only channel 31 reports an error; a request that fails with a bad-size response and no connection error fails all 32 channels and leaves the port connected; after a forced transport error every channel fails and the port reconnects. The driver before this change, with the same tests, fails `temperature array one request per poll` with one request for each of the 32 channels. The controls `tin-per-channel` fails the same assertion, `tin-single-scale` fails `temperature array one request per scale run`, `tin-no-timestamp` fails `temperature array timestamp is the time of the poll`, `tin-run-failure` fails `temperature array request failure fails every channel and keeps the port connected`, `tin-tse-default` fails `temperature array TSE macro defaults to 0` with a default of -2, and `tin-call-status` fails `temperature array open channel reads -9999 and stays valid`. The E-TC and USB paths are not exercised by any test; their unchanged behavior was checked by reading the diff only. | `work/m3-array/r5/`: `block8.out`, `array-fixed-*`; `work/m3-array/r6/`: `var-*-run` |
+| T2 | 2026-11-09T17:08:27Z to 17:22:23Z | Same environment; Perl 5.40.1 and 5.26.3; Rocky 8 image | Pass: the 14 earlier cases pass 995 assertions, the 4 MAC cases 35, the 8 endpoint cases 45, `silent-device` 8 and `read-error` 13, with every IOC exit 0 and their recovery deadlines unchanged; the exit loop passes 150 of 150; the commands of the README section "Static checks" pass on the host and in the Rocky 8 image, including both usage checks that print `exit 2`, and `drvMultiFunction.cpp` and `reconnect_ioc.cpp` compile there without error. A first full run failed the four digital cases, which is recorded in Closure Evidence, and the run recorded here is the repeat after the correction. | `work/m3-array/r5/`: `block0.out` to `block7.out`, `loop.out`, `static0.out`, `static1.out` |
+| T3 | 2026-11-09 | Repository documents in the working tree of this verification | Pass: `docs/reconnection.md` describes the single request per run of one scale, the meaning of the values -9999, -11111 and -7777, the failure of a whole request, the acquisition time, the `TSE` macro with its default and the limit to a network TC32; `tests/README.md` gives the `temperature-array` command and its duration of about 20 seconds, the original-behavior control and six negative controls. Every command in the text was executed in the run above, the macro example is the string the test IOC uses, and the duration was measured at 17 to 18 seconds. | `docs/reconnection.md` section Thermocouple reads and acquisition time; `tests/README.md` section Temperature array case |
+
+Source identity of the run: `drvMultiFunction.cpp` SHA-256 `7fdfcc9ceacfede45c28bad02897c511132f5f4210eec83d20a9a0cfdbd91e77`; `measCompTemperatureIn.template` `e25747a101a3bffbe9fce499ad6fac38593b91093a49d51a839d0093bc62f090`; `test_reconnect.pl` `ef688458c03839c51331087b9ee6ae0f1721273a288c2b5b1fea2edb2e2ac5d1`; `reconnect_ioc.cpp` `92b9fc2e50f150274855b4407ac1735c9f267de21dd0ca9da017347ff416c0d6`; `TC32.pm` `f293d2cb4798702afe3af0909db1d67fd1d5a1e27b8e96666ccbcf3797f5f3ac`; `E1608.pm` `621e8daa6c1cad55010dcaa381c3f4722913054c83585d60ab3c1d91f791f930`; `build_reconnect.pl` `c9f049c2ba64934b717e0d27b49fcdd0941cfc472c1ef1da0bb993351478a400`; `exit_loop.bash` `5f4a0f6085a08021f94508424297302de8913745de940d53c2d59786f96f9826`; `tests/README.md` `48211bdda2929e4f744b6c2a7951006052804133acbf190bbdb98f2a38ece4ca`; `docs/reconnection.md` `319bff5b75cf00aa7d9b5d98e82fd7be4368d81c675f1496e551f9fba2735020`. No source file changed between the start of the run and these hashes; the variants were run again from the same sources in `work/m3-array/r6/`. The driver before this change is the committed `ce193b1` `drvMultiFunction.cpp` built with the final tests.
 
 ##### Closure Evidence
 
-- Found 2026-11-08 by reading `AiETc32::tIn()`, `AiETc32::tInArray()`, `AiETc::tInArray()` and the poller; not measured. No plan is accepted yet.
+- Found 2026-11-08 by reading `AiETc32::tIn()`, `AiETc32::tInArray()`, `AiETc::tInArray()` and the poller; not measured.
+- Read 2026-11-09 in the ULDAQ 1.2.2 source: `AiETc32::tInArray` (`src/net/ai/AiETc32.cpp`) maps the device values -7777, -8888 and -9999 to the data values -7777, -9999 and -11111, throws `ERR_OPEN_CONNECTION` before `ERR_CMR_EXCEEDED` when both occur, and takes one scale and a contiguous range; `AiETc::tInArray` (`src/net/ai/AiETc.cpp`) does the same without the common-mode value. In this repository `tests/TC32.pm` selects its temperature fault by the request mask `0x80000000` and `channel_requests` of the `read-error` case counts masks equal to one channel bit; both assume one channel per request. The digital cases found the same assumption in `digital_window` of `tests/test_reconnect.pl` on 2026-11-09, which waits for a request with the mask `0x80000000` to mark the end of a poll; the first full run failed all four with "digital observation poll deadline exceeded".
+- The first run of the control `tin-tse-default` passed all assertions instead of failing, because the control script ran every variant with the template of the repository and not with the variant's own copy; the script was corrected and all variants were run again (2026-11-09), which gave the results recorded under T1.
 
 ##### GitHub Projection
 
@@ -410,6 +431,7 @@ Last Compared: 2026-11-08T05:09:19Z; remote updated at 2026-11-08T05:09:19Z
 | M7 | Generator transport-error handling | Carry-forward | Blocked | No | G1 | A transport error in a generator write disconnects the port and the first error code is kept; the network temperature devices are unchanged; [detail](#m7---generator-transport-error-handling) |
 | M8 | Open-detect result on input type change | Carry-forward | Blocked | No | G1 | A connection error from the open-detect call in the input-type branch disconnects the port; [detail](#m8---open-detect-result-on-input-type-change) |
 | M9 | Persistent errors of the other poll-loop reads | Carry-forward | Open | No |  | The digital input, counter, analog input and scan status reads report a persistent error once per change as the temperature read does, or the owner records that they need not; priority and fixture are undecided; [detail](#m9---persistent-errors-of-the-other-poll-loop-reads) |
+| M10 | E-TC array read | Carry-forward | Open | No |  | The E-TC reads its channels with one request per poll, verified with an E-TC protocol fixture; priority and fixture scope are undecided; [detail](#m10---e-tc-array-read) |
 | G1 | USB board for hardware verification | External gate | Open | No |  | A USB board that exercises M7 or M8 is available and its model is recorded; [detail](#g1---usb-board-for-hardware-verification) |
 
 ### Backlog Details
@@ -657,6 +679,66 @@ Superseded Plan Artifacts: none
 ##### Closure Evidence
 
 - Observed 2026-11-08 while reviewing the plan of M2: the call sites are `reportError()` after `DIn`, `CIn`, `AIn` and the scan status calls in the poll loop.
+
+##### GitHub Projection
+
+Title: none
+Labels: none
+GitHub Milestone: none
+Observed State: none
+Observed Labels: none
+Observed Milestone: none
+Last Compared: never
+
+#### M10 - E-TC Array Read
+
+Origin: 9c39e49 / M10
+Identity History: none
+GitHub Issue: none
+Status: Open
+
+##### Summary
+
+The E-TC network thermocouple device is read one channel per `ulTIn()`, and `AiETc::tIn()` calls `tInArray(channel, channel, ...)`, so each channel costs its own request. `AiETc::tInArray()` reads a range with one `CMD_TIN` request and maps the device values -8888 and -9999 to -9999 and -11111 (`src/net/ai/AiETc.cpp` of ULDAQ 1.2.2, read 2026-11-09). `tests/` has no E-TC protocol fixture, so a change to this path cannot be exercised.
+
+##### Scope
+
+Decide whether the E-TC gets the array read of the TC32 and an E-TC fixture for its discovery and `CMD_TIN` frames.
+
+Out of scope: The TC32, which reads its channels in one request under the persistent read error and single-request work, and USB boards.
+
+##### Completion Criteria
+
+- The owner decides the priority and the fixture scope, and the row is then moved to Not started, Deferred or retired with a dated decision.
+
+##### Dependencies And Decisions
+
+- Decision Date: 2026-11-09. The owner chose to change only the TC32 under the single-request work and to register the E-TC here, because no fixture exists for it.
+
+##### Implementation Plan
+
+Plan Status: draft
+Plan Acceptance: none
+Implementation Authorization: none
+Superseded Plan Artifacts: none
+
+1. Add an E-TC fixture, then apply the array read of the TC32 to the E-TC and count its temperature requests.
+
+##### Test Plan
+
+| Label | Layer | Method | Environment | Expected Result |
+| --- | --- | --- | --- | --- |
+| T1 | Integration | Run a case on an E-TC fixture and count the temperature requests of one poll. | Common integration environment with an E-TC fixture | One temperature request per poll; the driver before the change issues one per channel. |
+
+##### Verification Results
+
+| Label | Observed At | Environment | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| T1 | Not run | Common integration environment | Pending | none |
+
+##### Closure Evidence
+
+- Observed 2026-11-09 while reviewing the plan of the single-request work: `tests/` holds only `TC32.pm` and `E1608.pm`.
 
 ##### GitHub Projection
 
