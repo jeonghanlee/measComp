@@ -197,12 +197,17 @@ described below. Any other error of a request fails every channel of the
 request, and a connection error disconnects the port.
 
 The driver updates the acquisition time once per poll, after the channels are
-read, and every channel of the poll carries it. A record with `TSE=-2` takes
-that time instead of the time its processing started. The temperature template
-exposes the field as the macro `TSE`, whose default 0 keeps the previous
-behavior, for example `P=TEST:,R=T0,PORT=DAQ,ADDR=0,SCAN=I/O Intr,PREC=3,TSE=-2`.
-Use `TSE=-2` only with a network TC32: the other boards do not update the
-acquisition time.
+read, and every channel of the poll carries it. A record that is scanned
+`I/O Intr` and has `TSE=-2` takes that time instead of the time its processing
+started. A periodically scanned record does not: the `asynFloat64Average`
+device support of the template sets the time of a record only when it is
+scanned `I/O Intr`, so a record with `TSE=-2` and a periodic scan keeps the time
+it had when `TSE` was set. The shipped `TC32.substitutions` scan every second,
+so set `SCAN` to `I/O Intr` on the records that use `TSE=-2`. The temperature
+template exposes the field as the macro `TSE`, whose default 0 keeps the
+previous behavior, for example
+`P=TEST:,R=T0,PORT=DAQ,ADDR=0,SCAN=I/O Intr,PREC=3,TSE=-2`. Use `TSE=-2` only
+with a network TC32: the other boards do not update the acquisition time.
 
 ## Persistent thermocouple read errors
 

@@ -432,8 +432,9 @@ channels at one scale a poll must issue one request for all 32 channels. It
 then sets channel 0 to Fahrenheit and channel 31 to Kelvin and requires three
 requests per poll, for channel 0, channels 1 to 30 and channel 31, and the
 records to read 72.5 and 295.65 for 22.5 degrees Celsius. The test IOC loads
-the records of channels 0, 1 and 31 with `TSE=-2` and the record of channel 2
-without the macro, whose `TSE` field must be 0. The timestamps must be
+the records of channels 0, 1 and 31 scanned `I/O Intr`, the only scan for which
+`TSE=-2` takes effect, with `TSE=-2`, and the record of channel 2 without the
+macro, whose `TSE` field must be 0. The timestamps must be
 equal within one poll, lie within two seconds of the current time and advance
 from one poll to the next. The case then makes channel 0 open, channel 1
 disabled and channel 31 a common-mode error in one request and requires -9999
