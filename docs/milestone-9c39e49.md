@@ -8,11 +8,11 @@ Git upstream: origin/site
 Remote tracker: [jeonghanlee/measComp milestone 2](https://github.com/jeonghanlee/measComp/milestone/2)
 GitHub milestone: Network thermocouple acquisition
 Due date: none
-Remote milestone observed at: 2026-11-09T08:55:32Z; state: open; three open issues (#13 to #15) and two closed issues (#11 and #12)
+Remote milestone observed at: 2026-11-09T17:31:46Z; state: open; two open issues (#14 and #15) and three closed issues (#11 to #13)
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/2`.
 Baseline commit: 9c39e491e463fac77f15cfcec16aa8b4a97cbf10
 
-Next session entry point: Commit the M3 (issue #13) implementation, push it, sync issue #13 with the narrowed TC32 scope and the result and close it, then mark M3 Complete. Issues #11 to #15 are assigned to GitHub milestone 2.
+Next session entry point: Review and accept the plan of M4 (issue #14) in its detail, the nearest Ready row; it can use the per-channel values and the request shape that the single-request read added to `tests/TC32.pm`. Issues #11 to #15 are assigned to GitHub milestone 2.
 
 ## Scope
 
@@ -30,11 +30,11 @@ The common integration environment is Linux with the real measComp driver, EPICS
 | --- | --- | --- | --- | --- | --- | --- |
 | M1 | Silent device stalls other ports | Carry-forward | Complete | No | | A healthy port keeps polling beside a silent network device; issue #11; [detail](#m1---silent-device-stalls-other-ports) |
 | M2 | Persistent read error logging | Carry-forward | Complete | No | | A persistent thermocouple read error is reported once per change; issue #12; [detail](#m2---persistent-read-error-logging) |
-| M3 | Single-request thermocouple read and acquisition time | Carry-forward | In progress | No | | One temperature request per scale group per poll with one acquisition timestamp; issue #13; [detail](#m3---single-request-thermocouple-read-and-acquisition-time) |
+| M3 | Single-request thermocouple read and acquisition time | Carry-forward | Complete | No | | One temperature request per scale group per poll with one acquisition timestamp; issue #13; [detail](#m3---single-request-thermocouple-read-and-acquisition-time) |
 | M4 | Thermocouple device diagnostics | Carry-forward | Not started | Yes | | Cold-junction temperatures, mains rejection and calibration information are exposed; issue #14; [detail](#m4---thermocouple-device-diagnostics) |
 | M5 | Temperature filter on Linux | Carry-forward | Not started | Yes | | The temperature filter takes effect on Linux; issue #15; [detail](#m5---temperature-filter-on-linux) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: two Complete, one In progress and two Not started. `Ready` records dependency readiness only. No external prerequisite is established for these rows.
+The row order follows issue numbers and imposes no execution dependency. Current status: three Complete and two Not started. `Ready` records dependency readiness only. No external prerequisite is established for these rows.
 
 ### Milestone Details
 
@@ -210,7 +210,7 @@ Last Compared: 2026-11-09T08:55:32Z; remote updated at 2026-11-09T08:52:13Z
 Origin: 9c39e49 / M3
 Identity History: none
 GitHub Issue: [#13](https://github.com/jeonghanlee/measComp/issues/13)
-Status: In progress
+Status: Complete
 
 ##### Summary
 
@@ -282,15 +282,19 @@ Source identity of the run: `drvMultiFunction.cpp` SHA-256 `7fdfcc9ceacfede45c28
 - Read 2026-11-09 in the ULDAQ 1.2.2 source: `AiETc32::tInArray` (`src/net/ai/AiETc32.cpp`) maps the device values -7777, -8888 and -9999 to the data values -7777, -9999 and -11111, throws `ERR_OPEN_CONNECTION` before `ERR_CMR_EXCEEDED` when both occur, and takes one scale and a contiguous range; `AiETc::tInArray` (`src/net/ai/AiETc.cpp`) does the same without the common-mode value. In this repository `tests/TC32.pm` selects its temperature fault by the request mask `0x80000000` and `channel_requests` of the `read-error` case counts masks equal to one channel bit; both assume one channel per request. The digital cases found the same assumption in `digital_window` of `tests/test_reconnect.pl` on 2026-11-09, which waits for a request with the mask `0x80000000` to mark the end of a poll; the first full run failed all four with "digital observation poll deadline exceeded".
 - The first run of the control `tin-tse-default` passed all assertions instead of failing, because the control script ran every variant with the template of the repository and not with the variant's own copy; the script was corrected and all variants were run again (2026-11-09), which gave the results recorded under T1.
 
+- Landed: observed 2026-11-09T17:31:46Z after `git fetch`, `origin/site` is at commit 95034aa8c14c760614d5578de94dcf169898ab37, the same commit as the local `HEAD`, and the seven paths changed by the implementation commit 01c2ecd (`measCompApp/src/drvMultiFunction.cpp`, `measCompApp/Db/measCompTemperatureIn.template`, `tests/TC32.pm`, `tests/reconnect_ioc.cpp`, `tests/test_reconnect.pl`, `tests/README.md`, `docs/reconnection.md`) show no difference between that commit and `origin/site`. Recheck with `git diff 01c2ecd origin/site -- <path>`.
+- Issue: the owner delegated the issue operations on 2026-11-09; the title was narrowed to the TC32, the body was synchronized with the implemented behavior and the narrowed scope and its five acceptance criteria were checked, a closing comment was posted and issue #13 was closed as completed at 2026-11-09T17:30:19Z. The read-back shows state CLOSED, label enhancement and milestone 2.
+- Remaining behavior: the E-TC and the USB boards still read one channel per request and keep the processing time as timestamp; row M10 tracks the E-TC, which needs a protocol fixture first.
+
 ##### GitHub Projection
 
-Title: Read all thermocouple channels in one request and stamp the acquisition time
+Title: Read all TC32 thermocouple channels in one request and stamp the acquisition time
 Labels: enhancement
 GitHub Milestone: Network thermocouple acquisition (milestone 2)
-Observed State: open
+Observed State: closed
 Observed Labels: enhancement
 Observed Milestone: Network thermocouple acquisition (milestone 2)
-Last Compared: 2026-11-08T05:09:19Z; remote updated at 2026-11-08T05:09:16Z
+Last Compared: 2026-11-09T17:31:46Z; remote updated at 2026-11-09T17:30:19Z
 
 #### M4 - Thermocouple Device Diagnostics
 
