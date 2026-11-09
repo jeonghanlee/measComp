@@ -1,6 +1,7 @@
 record(ai,"$(P)$(R)")
 {
     field(SCAN, "$(SCAN)")
+    field(TSE,  "$(TSE=0)")
     field(DTYP, "asynFloat64Average")
     field(INP,  "@asyn($(PORT),$(ADDR))TEMPERATURE_IN_VALUE")
     field(PREC, "$(PREC)")

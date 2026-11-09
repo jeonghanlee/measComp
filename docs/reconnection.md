@@ -183,6 +183,27 @@ not remove the blocking. These limits remain and need changes in ULDAQ:
   unprotected; with a protected registry a silent device would no longer
   block the other ports at all.
 
+## Thermocouple reads and acquisition time
+
+A network TC32 is read with one `ulTInArray()` request for each run of
+consecutive channels that share a temperature scale, so a poll issues one
+temperature request when every channel has the same scale and one more for
+each change of scale between neighbouring channels. The E-TC and the USB
+boards still read one channel per request. The result of each channel comes
+from its value: -9999 is an open thermocouple and a valid reading, -11111 is a
+disabled channel and also a valid reading, and -7777 is a common-mode error
+that makes only that channel INVALID with its last value and is reported as
+described below. Any other error of a request fails every channel of the
+request, and a connection error disconnects the port.
+
+The driver updates the acquisition time once per poll, after the channels are
+read, and every channel of the poll carries it. A record with `TSE=-2` takes
+that time instead of the time its processing started. The temperature template
+exposes the field as the macro `TSE`, whose default 0 keeps the previous
+behavior, for example `P=TEST:,R=T0,PORT=DAQ,ADDR=0,SCAN=I/O Intr,PREC=3,TSE=-2`.
+Use `TSE=-2` only with a network TC32: the other boards do not update the
+acquisition time.
+
 ## Persistent thermocouple read errors
 
 When a thermocouple channel keeps returning the same error, as a TC32 channel
@@ -262,6 +283,11 @@ The read-error case switches a common-mode condition on for two channels of a
 TC32 and counts the driver's lines, checks the records and
 `LAST_ERROR_MESSAGE`, a different error on a failing channel, a reconnect while
 the condition lasts, and the return to normal of each channel.
+The temperature-array case reads a TC32 fixture with all channels at one scale
+and with three runs of scales, counts the temperature requests of each poll,
+and checks the scale of each channel, the timestamp of the records, an open, a
+common-mode and a disabled channel in one request, the default of the `TSE`
+macro, a request that fails without a connection error, and a transport error.
 Real hardware power cycling, physical ADC calibration, analog output
 voltage, scan acquisition, EXP-32, USB, Windows and other models require
 separate verification.

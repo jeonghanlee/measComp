@@ -39,7 +39,7 @@ my %CASES = map { $_ => 1 } qw(reconnect digital-word digital-control digital-po
     bounds-tc32-online bounds-tc32-offline bounds-e1608-online bounds-e1608-offline
     mac-tc32-online mac-tc32-offline mac-two-ports mac-known-absent
     endpoint-same-ip endpoint-mixed endpoint-distinct-ip endpoint-default-port endpoint-alt-port
-    endpoint-hostname endpoint-hostname-port endpoint-wrong-port silent-device read-error);
+    endpoint-hostname endpoint-hostname-port endpoint-wrong-port silent-device read-error temperature-array);
 my $ALT_DISCOVERY_PORT = 54221;
 my $UNUSED_DISCOVERY_PORT = 54231;
 my $SILENT_ADDRESS = '192.0.2.3';
@@ -54,6 +54,13 @@ my $READ_ERROR_WINDOW = 8;
 my $READ_ERROR_POLLS = 100;
 my $READ_ERROR_CODE = 107;
 my $READ_ERROR_SETTLE = 1;
+my $ARRAY_WINDOW = 3;
+my $ARRAY_SETTLE = 1;
+my $ARRAY_MIN_POLLS = 20;
+my $ARRAY_SCALE_MASKS = '00000001,7ffffffe,80000000';
+my $TIMESTAMP_TOLERANCE = 2;
+my $ARRAY_CHANNEL_COUNT = 32;
+my $EPICS_EPOCH_OFFSET = 631152000;
 my $FIXTURE_HOSTNAME = 'fixture-a';
 my @ANALOG_FIELDS = qw(bounds_status low high raw value slope offset egul eguf udf severity pact linear timestamp);
 my $ANALOG_TOLERANCE = 1e-10;
@@ -1047,7 +1054,7 @@ sub channel_requests {
     my ($device, $channel, $from, $to) = @_;
     return scalar grep {
         my (undef, undef, $base) = unpack('CCV', pack('H*', $_->{payload}));
-        $_->{command} == 0x12 && $_->{time} >= $from && $_->{time} <= $to && $base == (1 << $channel);
+        $_->{command} == 0x12 && $_->{time} >= $from && $_->{time} <= $to && ($base & (1 << $channel));
     } @{$device->{traffic}};
 }
 
@@ -1149,6 +1156,144 @@ sub exercise_read_error {
     return;
 }
 
+# The temperature-array case checks that a network TC32 is read with one request per run of channels
+# that share a temperature scale, that every channel keeps its own scale, that the records of one poll
+# carry the time of that poll, that an open, a common-mode and a disabled channel in one request are
+# told apart, and that a transport error fails the request and recovers.
+sub temperature_polls {
+    my ($device, $from, $to) = @_;
+    my ($digital, @masks) = (0);
+    for my $entry (grep { $_->{time} >= $from && $_->{time} <= $to } @{$device->{traffic}}) {
+        if ($entry->{command} == 0x00) { $digital++; }
+        elsif ($entry->{command} == 0x12) {
+            my (undef, undef, $base) = unpack('CCV', pack('H*', $entry->{payload}));
+            push @masks, $base;
+        }
+    }
+    return {polls => $digital, requests => scalar(@masks), masks => [@masks]};
+}
+
+sub mask_set {
+    my ($polls) = @_;
+    my %seen = map { sprintf('%08x', $_) => 1 } @{$polls->{masks}};
+    return join(',', sort keys %seen);
+}
+
+sub record_values {
+    my ($run, $name) = @_;
+    my @fields = split /\s+/, command($run, "RECORD $name", 'RECORD');
+    shift @fields;
+    die "malformed IOC record: $name\n" unless @fields == 6;
+    return {value => 0 + $fields[0], severity => 0 + $fields[1], undefined => 0 + $fields[2],
+        time => $fields[3] + $EPICS_EPOCH_OFFSET + $fields[4] / 1e9, tse => 0 + $fields[5]};
+}
+
+sub put_ok {
+    my ($run, $record, $value) = @_;
+    return command($run, "PUT $record $value") =~ /\ARESULT 0 / ? 1 : 0;
+}
+
+sub exercise_array {
+    my ($run) = @_;
+    my $device = $run->{device};
+    read_prefix($run, 'READY');
+    healthy($run, 22.5);
+
+    # With every channel at one scale a poll issues one temperature request for all channels.
+    my $from = now();
+    pause($run, $ARRAY_WINDOW);
+    my $one = temperature_polls($device, $from, now());
+    check($run, 'temperature array one request per poll', $one->{polls} >= $ARRAY_MIN_POLLS
+        && abs($one->{requests} - $one->{polls}) <= 1 && mask_set($one) eq 'ffffffff',
+        {polls => $one->{polls}, requests => $one->{requests}, masks => mask_set($one)});
+
+    # Channel 0 at Fahrenheit and channel 31 at Kelvin split the poll into three runs.
+    check($run, 'temperature array scale writes', put_ok($run, 'TEST:T0Scale', 1)
+        && put_ok($run, 'TEST:T31Scale', 2), 'TEST:T0Scale 1, TEST:T31Scale 2');
+    pause($run, $ARRAY_SETTLE);
+    $from = now();
+    pause($run, $ARRAY_WINDOW);
+    my $three = temperature_polls($device, $from, now());
+    check($run, 'temperature array one request per scale run', $three->{polls} >= $ARRAY_MIN_POLLS
+        && abs($three->{requests} - 3 * $three->{polls}) <= 3 && mask_set($three) eq $ARRAY_SCALE_MASKS,
+        {polls => $three->{polls}, requests => $three->{requests}, masks => mask_set($three)});
+    my ($fahrenheit, $kelvin) = (record_values($run, 'TEST:T0'), record_values($run, 'TEST:T31'));
+    check($run, 'temperature array keeps the scale of each channel', abs($fahrenheit->{value} - 72.5) < 0.01
+        && abs($kelvin->{value} - 295.65) < 0.01 && $fahrenheit->{severity} == 0 && $kelvin->{severity} == 0,
+        {fahrenheit => $fahrenheit->{value}, kelvin => $kelvin->{value}});
+    check($run, 'temperature array scale restore', put_ok($run, 'TEST:T0Scale', 0)
+        && put_ok($run, 'TEST:T31Scale', 0), 'TEST:T0Scale 0, TEST:T31Scale 0');
+    healthy($run, 22.5);
+
+    # The TSE macro of the template defaults to 0, and a record that sets it takes the value.
+    my ($default_tse, $set_tse) = (record_values($run, 'TEST:T2')->{tse}, record_values($run, 'TEST:T0')->{tse});
+    check($run, 'temperature array TSE macro defaults to 0', $default_tse == 0 && $set_tse == -2,
+        {default => $default_tse, set => $set_tse});
+
+    # The records of one poll carry the time of that poll.
+    my @names = qw(TEST:T0 TEST:T1 TEST:T31);
+    my ($same, $first, $attempts) = (undef, undef, 0);
+    while (!$same && $attempts++ < 50) {
+        my @times = map { record_values($run, $_)->{time} } @names;
+        $same = \@times if $times[0] == $times[1] && $times[1] == $times[2];
+    }
+    $first = $same ? $same->[0] : undef;
+    check($run, 'temperature array records of one poll share a timestamp', defined($same), {attempts => $attempts});
+    check($run, 'temperature array timestamp is the time of the poll', abs(time() - $first) < $TIMESTAMP_TOLERANCE,
+        {age => time() - $first});
+    pause($run, 1);
+    my $later = record_values($run, 'TEST:T0')->{time};
+    check($run, 'temperature array timestamp advances with the poll', $later - $first > 0.5,
+        {advance => $later - $first});
+
+    # An open, a common-mode and a disabled channel in one request are told apart.
+    my $mark = scalar @{$run->{driver_lines}};
+    $device->set_open(0);
+    $device->set_disabled(1);
+    $device->set_common_mode(31);
+    wait_for($run, sub { my ($state) = @_; return $state->{severity31} == 3; });
+    pause($run, $ARRAY_SETTLE);
+    my ($open, $disabled, $common) = map { record_values($run, $_) } @names;
+    check($run, 'temperature array open channel reads -9999 and stays valid', $open->{value} == -9999
+        && $open->{severity} == 0 && $open->{undefined} == 0, $open);
+    check($run, 'temperature array disabled channel reads -11111', $disabled->{value} == -11111
+        && $disabled->{severity} == 0, $disabled);
+    check($run, 'temperature array common-mode channel is invalid with its held value', $common->{severity} == 3
+        && abs($common->{value} - 22.5) < 0.001, $common);
+    my @starts = read_error_starts(driver_lines_since($run, $mark));
+    check($run, 'temperature array only the common-mode channel reports an error', @starts == 1
+        && join(',', line_channels(@starts)) eq '31', [@starts]);
+    $device->clear_channel_values(0, 1, 31);
+    healthy($run, 22.5);
+
+    # A request that fails without a connection error fails every channel and keeps the port connected.
+    my $failure_mark = scalar @{$run->{driver_lines}};
+    $device->{fault} = [0x12, 'bad-size'];
+    pause($run, $ARRAY_SETTLE + 1);
+    my %failed_channels = map { /Calling TIn channel (\d+), err=\d+/ ? ($1 => 1) : () }
+        driver_lines_since($run, $failure_mark);
+    my $after_failure = state($run);
+    check($run, 'temperature array request failure fails every channel and keeps the port connected',
+        scalar(keys %failed_channels) == $ARRAY_CHANNEL_COUNT && $after_failure->{connected} == 1,
+        {channels => scalar(keys %failed_channels), connected => $after_failure->{connected}});
+    check($run, 'temperature array recovers after the request failure', 1, healthy($run, 22.5));
+
+    # A transport error fails the request, so every channel, and the port recovers.
+    $device->{fault} = [0x12, 'eof'];
+    my $failed = wait_for($run, sub {
+        my ($state) = @_;
+        return $state->{connected} == 0 && $state->{severity} == 3 && $state->{severity31} == 3;
+    });
+    check($run, 'temperature array transport error fails the channels', 1, $failed);
+    $device->{online} = 1;
+    check($run, 'temperature array reconnects after the transport error', 1, healthy($run, 22.5));
+    check($run, 'temperature array fixture commands supported', !@{$device->{errors}}, $device->{errors});
+    print {$run->{input}} "QUIT\n" or die "IOC input write: $!\n";
+    wait_exit($run, $EXIT_TIMEOUT) or die "IOC exit deadline exceeded\n";
+    check($run, 'temperature array IOC exits normally', $run->{ioc_exit} == 0, $run->{ioc_exit});
+    return;
+}
+
 sub digital_window {
     my ($run) = @_;
     my $device = $run->{device};
@@ -1162,7 +1307,7 @@ sub digital_window {
             my $request = $device->{traffic}[$cursor++];
             next unless $request->{command} == 0x12;
             my (undef, undef, $channels) = unpack('CCV', pack('H*', $request->{payload}));
-            next unless $channels == 0x80000000;
+            next unless $channels & 0x80000000;
             my $observed = state($run);
             check($run, 'digital observation starts after a healthy poll',
                 $observed->{connected} == 1 && $observed->{severity} == 0
@@ -1464,7 +1609,7 @@ sub main {
         if ($case =~ /\Amac-/) { setup_mac($run); }
         elsif ($case =~ /\Aendpoint-/) { setup_endpoint($run); }
         elsif ($case eq 'silent-device') { setup_silent($run); }
-        elsif ($case eq 'read-error') { $run->{device} = TC32->new(); $run->{device}{online} = 1; }
+        elsif ($case eq 'read-error' || $case eq 'temperature-array') { $run->{device} = TC32->new(); $run->{device}{online} = 1; }
         else { $run->{device} = ($run->{model} // '') eq 'e1608' ? E1608->new() : TC32->new(); }
         $run->{device}{online} = 1 if $case =~ /-online\z/;
         launch_ioc($run, $executable, $dbd, $template);
@@ -1474,6 +1619,7 @@ sub main {
         elsif ($case =~ /\Aendpoint-/) { exercise_endpoint($run); }
         elsif ($case eq 'silent-device') { exercise_silent($run); }
         elsif ($case eq 'read-error') { exercise_read_error($run); }
+        elsif ($case eq 'temperature-array') { exercise_array($run); }
         elsif ($case =~ /\Amac-/) { exercise_mac($run); }
         elsif ($run->{model}) { exercise_enums($run); }
         elsif ($case eq 'reconnect') { exercise($run); }
@@ -1521,7 +1667,7 @@ Print usage and exit successfully.
 
 =item --case NAME
 
-Select reconnect (default), digital-word, digital-control, digital-policy, digital-bits, enum-tc32-online, enum-tc32-offline, enum-e1608-online, enum-e1608-offline, enum-e1608-init, bounds-tc32-online, bounds-tc32-offline, bounds-e1608-online, bounds-e1608-offline, mac-tc32-online, mac-tc32-offline, mac-two-ports, mac-known-absent, endpoint-same-ip, endpoint-mixed, endpoint-distinct-ip, endpoint-default-port, endpoint-alt-port, endpoint-hostname, endpoint-hostname-port, endpoint-wrong-port, silent-device or read-error. Each invocation creates a fresh IOC and its external fixtures.
+Select reconnect (default), digital-word, digital-control, digital-policy, digital-bits, enum-tc32-online, enum-tc32-offline, enum-e1608-online, enum-e1608-offline, enum-e1608-init, bounds-tc32-online, bounds-tc32-offline, bounds-e1608-online, bounds-e1608-offline, mac-tc32-online, mac-tc32-offline, mac-two-ports, mac-known-absent, endpoint-same-ip, endpoint-mixed, endpoint-distinct-ip, endpoint-default-port, endpoint-alt-port, endpoint-hostname, endpoint-hostname-port, endpoint-wrong-port, silent-device, read-error or temperature-array. Each invocation creates a fresh IOC and its external fixtures.
 
 Enum cases compare all record enum states with public driver reads and model-specific expected values, write every supported selection through the record, and check RVAL, SDEF, asynchronous completion, alarm severity and public driver readback. They repeat two transport failures and reconnects. The init case holds the real IOC after record initialization, enables device responses, proves connection while interruptAccept is zero, and resumes IOC initialization.
 
@@ -1534,6 +1680,8 @@ Endpoint cases select devices by IP address, discovery port, hostname or MAC and
 The silent-device case runs a healthy TC32 port beside a second TC32 whose address is removed from the namespace after it has connected, so its packets are dropped without a reset. It compares the healthy port's requests in a 40-second window that begins 25 seconds after the removal with a 40-second window measured before it, requires at least 80 percent of that count and no pause longer than 4 seconds, then restores the address and requires the second port to reconnect with its own value within 70 seconds. A second outage of 22 seconds, long enough for the interval to be spaced, ends with the address restored and the second port disabled and enabled again, which must reconnect it within 12 seconds. It needs the network namespace of the other cases and the ip command.
 
 The read-error case switches a persistent common-mode condition on for channels 0 and 31 of a healthy TC32 and counts the driver's lines over an 8-second window of at least 100 polls. It requires one error line per channel that names the channel, INVALID records with their held value and LAST_ERROR_MESSAGE naming the condition. It injects a different error on channel 31 while its condition lasts and requires a new line for that error and another when the common-mode error returns. It forces a reconnect while the condition lasts and requires one new line per channel, switches the condition off on channel 0 and requires one line for its return to normal with the message unchanged, then off on channel 31, and requires its line and a cleared message.
+
+The temperature-array case checks that a network TC32 is read with one request for all channels when they share a temperature scale and with three requests when channel 0 is at Fahrenheit and channel 31 at Kelvin, counted from the fixture traffic against the digital read of each poll. It requires each channel to keep its own scale, the records of one poll to carry the time of that poll and to advance with it, an open channel to read -9999 and stay valid beside a disabled channel that reads -11111 and a common-mode channel that is invalid with its held value, the TSE macro of the template to default to 0, a request that fails without a connection error to fail every channel and keep the port connected, a transport error to fail every channel, and the port to recover.
 
 =back
 

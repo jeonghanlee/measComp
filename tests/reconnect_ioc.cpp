@@ -148,6 +148,28 @@ static void putNumber(const char *name, double value)
     std::printf("RESULT %ld %.17g\n", status, actual);
 }
 
+// Prints the value, severity, undefined state, timestamp and TSE field of a record, the timestamp as
+// seconds and nanoseconds since the EPICS epoch.
+static void readRecord(const char *record)
+{
+    DBADDR address;
+    if (dbNameToAddr(record, &address)) {
+        std::puts("RECORDERROR record missing");
+        return;
+    }
+    std::string name(record);
+    dbScanLock(address.precord);
+    double value = field((name + ".VAL").c_str());
+    double severity = field((name + ".SEVR").c_str());
+    double undefined = field((name + ".UDF").c_str());
+    double eventSource = field((name + ".TSE").c_str());
+    double seconds = address.precord->time.secPastEpoch;
+    double nanoseconds = address.precord->time.nsec;
+    dbScanUnlock(address.precord);
+    std::printf("RECORD %.9g %.0f %.0f %.0f %.0f %.0f\n", value, severity, undefined, seconds, nanoseconds,
+                eventSource);
+}
+
 // Prints the driver's LAST_ERROR_MESSAGE parameter, read through the public asynOctet interface.
 static void readMessage()
 {
@@ -283,8 +305,10 @@ int main(int argc, char **argv)
         } else if (loadEnums(argv[2], argv[5])) return 6;
         if (!std::strcmp(argv[6], "init")) initHookRegister(enumInitHook);
     } else {
-        if (dbLoadRecords(argv[2], "P=TEST:,R=T0,PORT=DAQ,ADDR=0,SCAN=I/O Intr,PREC=3")) return 6;
-        if (dbLoadRecords(argv[2], "P=TEST:,R=T31,PORT=DAQ,ADDR=31,SCAN=I/O Intr,PREC=3")) return 6;
+        if (dbLoadRecords(argv[2], "P=TEST:,R=T0,PORT=DAQ,ADDR=0,SCAN=I/O Intr,PREC=3,TSE=-2")) return 6;
+        if (dbLoadRecords(argv[2], "P=TEST:,R=T1,PORT=DAQ,ADDR=1,SCAN=I/O Intr,PREC=3,TSE=-2")) return 6;
+        if (dbLoadRecords(argv[2], "P=TEST:,R=T2,PORT=DAQ,ADDR=2,SCAN=I/O Intr,PREC=3")) return 6;
+        if (dbLoadRecords(argv[2], "P=TEST:,R=T31,PORT=DAQ,ADDR=31,SCAN=I/O Intr,PREC=3,TSE=-2")) return 6;
         if (dbLoadRecords(argv[4], "P=TEST:,R=D0,PORT=DAQ,ADDR=0,MASK=1")) return 6;
         if (secondPort && dbLoadRecords(argv[2], "P=TEST:,R=B0,PORT=DAQ2,ADDR=0,SCAN=I/O Intr,PREC=3")) return 6;
     }
@@ -351,6 +375,7 @@ int main(int argc, char **argv)
             std::printf("RESULT %d\n", writeSetting("THERMOCOUPLE_OPEN_DETECT", value, 31));
         else if (std::sscanf(command, "OTD %d", &value) == 1)
             std::printf("RESULT %d\n", writeSetting("THERMOCOUPLE_OPEN_DETECT", value));
+        else if (std::sscanf(command, "RECORD %63s", record) == 1) readRecord(record);
         else if (!std::strncmp(command, "MESSAGE", 7)) readMessage();
         else if (!std::strncmp(command, "QUIT", 4)) break;
         else std::puts("UNKNOWN");

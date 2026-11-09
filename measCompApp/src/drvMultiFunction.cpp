@@ -844,6 +844,7 @@ private:
   int reportError(int err, const char *functionName, const char *message);
   void reportTemperatureStatus(int channel, int status);
   #ifdef linux
+  int readTemperatureRuns(int *pInputStatus);
   int mapRange(int Gain, Range *range);
   int mapTriggerType(int cbwTriggerType, TriggerType *triggerType);
   #endif
@@ -1626,6 +1627,79 @@ void MultiFunction::reportTemperatureStatus(int channel, int status)
 }
 
 #ifdef linux
+// Reads the thermocouple channels of a network TC32 with one ulTInArray() call for each run of
+// consecutive thermocouple channels that share a temperature scale, so a poll costs one request when
+// every channel has the same scale.  ULDAQ fills the data of a call that reports an open thermocouple
+// or a common-mode error before it returns that status for the whole range, so the result of each
+// channel comes from its data value: -7777 is a common-mode error, -9999 an open thermocouple, which
+// is a valid reading of -9999, and any other value, -11111 for a disabled channel included, is a
+// reading.  Any other status fails every channel of the run.  The acquisition time of the poll is
+// updated once after the reads.  The return value is the status of the last channel, as in the
+// per-channel loop, and *pInputStatus is set to the status of the last failing channel.
+int MultiFunction::readTemperatureRuns(int *pInputStatus)
+{
+  static const char *functionName = "pollerThread";
+  int status = 0;
+  int channel = 0;
+  while (channel < numTemperatureIn_) {
+    int type, scale;
+    getIntegerParam(channel, analogInType_, &type);
+    if (type != AI_CHAN_TYPE_TC) {
+      tempReadStatus_[channel] = 0;
+      channel++;
+      continue;
+    }
+    getIntegerParam(channel, temperatureScale_, &scale);
+    int last = channel;
+    while (last + 1 < numTemperatureIn_) {
+      int nextType, nextScale;
+      getIntegerParam(last + 1, analogInType_, &nextType);
+      getIntegerParam(last + 1, temperatureScale_, &nextScale);
+      if (nextType != AI_CHAN_TYPE_TC || nextScale != scale) break;
+      last++;
+    }
+    TempScale tempScale;
+    switch (scale) {
+      case CELSIUS:     tempScale = TS_CELSIUS; break;
+      case FAHRENHEIT:  tempScale = TS_FAHRENHEIT; break;
+      case KELVIN:      tempScale = TS_KELVIN; break;
+      case VOLTS:       tempScale = TS_VOLTS; break;
+      case NOSCALE:     tempScale = TS_NOSCALE; break;
+      default:
+        asynPrint(pasynUserSelf, ASYN_TRACE_ERROR,
+          "%s::%s unsupported Scale=%d\n", driverName, functionName, scale);
+        tempScale = TS_CELSIUS;
+    }
+    double values[MAX_SIGNALS];
+    for (int c=0; c<=last-channel; c++) values[c] = epicsNAN;
+    int callStatus = ulTInArray(daqDeviceHandle_, channel, last, tempScale, TINARRAY_FF_DEFAULT, values);
+    bool perChannel = callStatus == 0 || callStatus == ERR_OPEN_CONNECTION || callStatus == ERR_CMR_EXCEEDED;
+    for (int c=channel; c<=last; c++) {
+      double value = values[c-channel];
+      int channelStatus = callStatus;
+      if (perChannel) channelStatus = (value == -7777.) ? ERR_CMR_EXCEEDED : 0;
+      status = channelStatus;
+      if (channelStatus) {
+        *pInputStatus = channelStatus;
+        setParamStatus(c, temperatureInValue_, asynError);
+        reportTemperatureStatus(c, channelStatus);
+        if (isConnectionError(channelStatus)) return channelStatus;
+        continue;
+      }
+      setParamStatus(c, temperatureInValue_, asynSuccess);
+      // We want to force a callback, even if the value is the same.
+      // This can only be done by setting the value once to a different value, then the correct value
+      setDoubleParam(c, temperatureInValue_, value+1);
+      setDoubleParam(c, temperatureInValue_, value);
+      reportTemperatureStatus(c, 0);
+      reportError(0, functionName, "Calling TIn");
+    }
+    channel = last + 1;
+  }
+  updateTimeStamp();
+  return status;
+}
+
 int MultiFunction::mapRange(int Gain, Range *range)
 {
     static const char *functionName = "mapRange";
@@ -3174,6 +3248,13 @@ void MultiFunction::pollerThread()
         }
       } // for numAnalogIn_
 
+      // A network TC32 reads its channels with ulTInArray(); the other boards read one channel at a time.
+      #ifdef linux
+      if (boardType_ == ETH_TC32) {
+        status = readTemperatureRuns(&inputStatus);
+        if (isConnectionError(status)) goto error;
+      } else
+      #endif
       for (i=0; i<numTemperatureIn_; i++) {
         getIntegerParam(i, analogInRange_, &range);
         getIntegerParam(i, analogInType_, &type);

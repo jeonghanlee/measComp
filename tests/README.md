@@ -424,6 +424,41 @@ command from its root. It must fail `read error reported once per channel`,
 because that driver prints an error line on every poll for every failing
 channel, hundreds of lines in the window instead of two.
 
+## Temperature array case
+
+`temperature-array` runs a healthy TC32 and counts the temperature requests
+its fixture receives against the digital reads, one per poll. With all
+channels at one scale a poll must issue one request for all 32 channels. It
+then sets channel 0 to Fahrenheit and channel 31 to Kelvin and requires three
+requests per poll, for channel 0, channels 1 to 30 and channel 31, and the
+records to read 72.5 and 295.65 for 22.5 degrees Celsius. The test IOC loads
+the records of channels 0, 1 and 31 with `TSE=-2` and the record of channel 2
+without the macro, whose `TSE` field must be 0. The timestamps must be
+equal within one poll, lie within two seconds of the current time and advance
+from one poll to the next. The case then makes channel 0 open, channel 1
+disabled and channel 31 a common-mode error in one request and requires -9999
+valid, -11111 valid and INVALID with the held value, with the driver reporting
+an error only for channel 31. It then fails one request without a connection
+error, which must fail all 32 channels and keep the port connected. Finally it
+forces a transport error on the temperature request, requires every channel to
+fail and the port to reconnect, and requires the IOC to exit normally. The case takes about 20
+seconds and runs in the namespace shell of the other cases:
+
+```bash
+export TEMPLATE="$PWD/measCompApp/Db/measCompTemperatureIn.template"
+export IOC="$BUILD/reconnect-ioc"
+export DBD="$BUILD/reconnect.dbd"
+export RUNNER="$PWD/tests/test_reconnect.pl"
+timeout 120s perl "$RUNNER" --case temperature-array "$IOC" "$DBD" "$TEMPLATE" "$BUILD/temperature-array.log"
+exit
+```
+
+For the original-behavior control, build a scratch copy whose
+`measCompApp/src/drvMultiFunction.cpp` is the version from before the
+single-request read, as described for the MAC cases, and run the same command
+from its root. It must fail `temperature array one request per poll`, because
+that driver issues one request for each of the 32 channels of a poll.
+
 ## Exit loop
 
 The driver stops and joins each port's poller thread in an exit handler, so
@@ -524,6 +559,12 @@ driver defect.
 | `read-error-ignores-code-change` | Compare only whether the status is zero, not its value, when deciding to report a channel | `a different error on a failing channel is reported again` in `read-error` |
 | `read-error-keeps-state` | Do not clear the per-channel read status when the port connects | `read error reported again once per channel after reconnect` in `read-error` |
 | `read-error-end-sets-message` | Set `LAST_ERROR_MESSAGE` when a channel returns to normal | `LAST_ERROR_MESSAGE keeps naming the failing channel` in `read-error` |
+| `tin-per-channel` | End a run of channels at every channel, so each channel is read by its own `ulTInArray()` call | `temperature array one request per poll` in `temperature-array` |
+| `tin-single-scale` | Ignore the scale of the following channels when forming a run | `temperature array one request per scale run` in `temperature-array` |
+| `tin-no-timestamp` | Omit `updateTimeStamp()` after the reads | `temperature array timestamp is the time of the poll` in `temperature-array` |
+| `tin-run-failure` | Treat the data of a request that failed for another reason as per-channel results | `temperature array request failure fails every channel and keeps the port connected` in `temperature-array` |
+| `tin-tse-default` | Change the default of the `TSE` macro in the temperature template to -2 | `temperature array TSE macro defaults to 0` in `temperature-array` |
+| `tin-call-status` | Give every channel of a request the status of the call | `temperature array open channel reads -9999 and stays valid` in `temperature-array` |
 
 This test does not establish hardware power-cycle behavior, sustained network
 loss endurance, Channel Access client reconnection, EXP-32, USB or Windows support.
