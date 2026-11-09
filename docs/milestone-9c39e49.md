@@ -8,11 +8,11 @@ Git upstream: origin/site
 Remote tracker: [jeonghanlee/measComp milestone 2](https://github.com/jeonghanlee/measComp/milestone/2)
 GitHub milestone: Network thermocouple acquisition
 Due date: none
-Remote milestone observed at: 2026-11-08T09:41:22Z; state: open; four open issues (#12 to #15) and one closed issue (#11)
+Remote milestone observed at: 2026-11-09T08:55:32Z; state: open; three open issues (#13 to #15) and two closed issues (#11 and #12)
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/2`.
 Baseline commit: 9c39e491e463fac77f15cfcec16aa8b4a97cbf10
 
-Next session entry point: Commit the M2 (issue #12) implementation, push it, sync issue #12 with the result and close it, then mark M2 Complete. Issues #11 to #15 are assigned to GitHub milestone 2.
+Next session entry point: Review and accept the revised plan of M3 (issue #13) in its detail, the nearest Ready row; it reuses `MultiFunction::reportTemperatureStatus()` and the per-channel values of `tests/TC32.pm`. Issues #11 to #15 are assigned to GitHub milestone 2.
 
 ## Scope
 
@@ -29,12 +29,12 @@ The common integration environment is Linux with the real measComp driver, EPICS
 | ID | Work unit | Type | Status | Ready | Deps | Done when / Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | M1 | Silent device stalls other ports | Carry-forward | Complete | No | | A healthy port keeps polling beside a silent network device; issue #11; [detail](#m1---silent-device-stalls-other-ports) |
-| M2 | Persistent read error logging | Carry-forward | In progress | No | | A persistent thermocouple read error is reported once per change; issue #12; [detail](#m2---persistent-read-error-logging) |
+| M2 | Persistent read error logging | Carry-forward | Complete | No | | A persistent thermocouple read error is reported once per change; issue #12; [detail](#m2---persistent-read-error-logging) |
 | M3 | Single-request thermocouple read and acquisition time | Carry-forward | Not started | Yes | | One temperature request per scale group per poll with one acquisition timestamp; issue #13; [detail](#m3---single-request-thermocouple-read-and-acquisition-time) |
 | M4 | Thermocouple device diagnostics | Carry-forward | Not started | Yes | | Cold-junction temperatures, mains rejection and calibration information are exposed; issue #14; [detail](#m4---thermocouple-device-diagnostics) |
 | M5 | Temperature filter on Linux | Carry-forward | Not started | Yes | | The temperature filter takes effect on Linux; issue #15; [detail](#m5---temperature-filter-on-linux) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: one Complete, one In progress and three Not started. `Ready` records dependency readiness only. No external prerequisite is established for these rows.
+The row order follows issue numbers and imposes no execution dependency. Current status: two Complete and three Not started. `Ready` records dependency readiness only. No external prerequisite is established for these rows.
 
 ### Milestone Details
 
@@ -124,7 +124,7 @@ Last Compared: 2026-11-08T09:41:22Z; remote updated at 2026-11-08T09:31:22Z
 Origin: 9c39e49 / M2
 Identity History: none
 GitHub Issue: [#12](https://github.com/jeonghanlee/measComp/issues/12)
-Status: In progress
+Status: Complete
 
 ##### Summary
 
@@ -191,15 +191,19 @@ Source identity of the run: `drvMultiFunction.cpp` SHA-256 `41861dc736de48e1eacb
 
 - Measured 2026-11-08 with the shipped harness and a temporary fixture variant returning the common-mode sentinel -7777: 3,040 lines in about five seconds, severity INVALID, value held at 22.5. The temporary variant is not in the repository, and `tests/TC32.pm` has no common-mode condition (read 2026-11-08). The plan assumed a poll every 50 ms; the measured rate with a TC32 fixture is about 19 polls per second, because each poll reads every channel, so the case uses an 8-second window and requires at least 100 polls.
 
+- Landed: observed 2026-11-09T08:55:32Z after `git fetch`, `origin/site` is at commit 484166964308df93d2b98a5dffd27e5ca668c485, the same commit as the local `HEAD`, and the six paths changed by the implementation commit af3a71d (`measCompApp/src/drvMultiFunction.cpp`, `tests/TC32.pm`, `tests/reconnect_ioc.cpp`, `tests/test_reconnect.pl`, `tests/README.md`, `docs/reconnection.md`) show no difference between that commit and `origin/site`. Recheck with `git diff af3a71d origin/site -- <path>`.
+- Issue: the owner delegated the issue operations on 2026-11-09; the body was synchronized with the implemented behavior and its five acceptance criteria were checked, a closing comment was posted and issue #12 was closed as completed at 2026-11-09T08:52:13Z. The read-back shows state CLOSED, label bug and milestone 2.
+- Remaining behavior: the other reads of the poll loop (digital input, counter, analog input and scan status) still print an error on every poll; row M9 tracks them. The value -8888, which a single-channel `ulTIn()` passes as a reading instead of an error, belongs to the sentinel handling of M3.
+
 ##### GitHub Projection
 
 Title: Report a persistent thermocouple read error once instead of on every poll
 Labels: bug
 GitHub Milestone: Network thermocouple acquisition (milestone 2)
-Observed State: open
+Observed State: closed
 Observed Labels: bug
 Observed Milestone: Network thermocouple acquisition (milestone 2)
-Last Compared: 2026-11-08T05:09:19Z; remote updated at 2026-11-08T05:09:15Z
+Last Compared: 2026-11-09T08:55:32Z; remote updated at 2026-11-09T08:52:13Z
 
 #### M3 - Single Request Thermocouple Read And Acquisition Time
 
