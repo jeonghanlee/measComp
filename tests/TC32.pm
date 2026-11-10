@@ -15,6 +15,12 @@ my $TIMEOUT_HOLD = 10;
 my $COMMON_MODE_VALUE = -7777;
 my $OPEN_VALUE = -8888;
 my $DISABLED_VALUE = -9999;
+my $DEFAULT_COLD_JUNCTION = 31.25;
+# Calibration dates as the device sends them: year minus 2000, month, day, hour, minute, second.
+# The two factory dates are the base and the expansion board. The four field dates are the base
+# at 60 Hz, the base at 50 Hz, the expansion at 60 Hz and the expansion at 50 Hz. All six differ.
+my @DEFAULT_FACTORY_DATES = ([23, 1, 2, 3, 4, 5], [23, 2, 3, 4, 5, 6]);
+my @DEFAULT_FIELD_DATES = ([24, 3, 4, 5, 6, 7], [24, 4, 5, 6, 7, 8], [24, 5, 6, 7, 8, 9], [24, 6, 7, 8, 9, 10]);
 
 sub new {
     my ($class, $address, $port, $options) = @_;
@@ -45,6 +51,9 @@ sub new {
         online => 0, temperature => 22.5, channel_values => {}, types => chr(1) x 64, measure => "\0\0",
         fault => undef, faults => [], errors => [], connections => 0, requests => 0,
         digital_in => 1, digital_out => [0, 0], traffic => [],
+        cold_junction => $DEFAULT_COLD_JUNCTION, cold_junction_values => {},
+        factory_dates => [map { [@$_] } @DEFAULT_FACTORY_DATES],
+        field_dates => [map { [@$_] } @DEFAULT_FIELD_DATES],
     }, $class;
 }
 
@@ -69,8 +78,8 @@ sub response {
     return $self->{measure} if $command == 0x18;
     if ($command == 0x19) { $self->{measure} = $data; return ''; }
     return '' if $command == 0x1b;
-    return pack('C6', 24, 1, 1, 0, 0, 0) x ($command == 0x3a ? 2 : 4)
-        if $command == 0x3a || $command == 0x3c;
+    return join('', map { pack('C6', @$_) } @{$self->{factory_dates}}) if $command == 0x3a;
+    return join('', map { pack('C6', @$_) } @{$self->{field_dates}}) if $command == 0x3c;
     return "\0" x 576 if $command == 0x20;
     return pack('CC', $self->{digital_in}, 0) if $command == 0x00;
     return pack('VV', @{$self->{digital_out}}) if $command == 0x02;
@@ -89,12 +98,48 @@ sub response {
         my @channels = grep { $base & (1 << $_) } 0 .. 31;
         return join('', map { pack('f<', $self->channel_value($_)) } @channels);
     }
+    if ($command == 0x13) {
+        return $self->reject('invalid cold-junction request length') unless length($data) == 8;
+        my ($base, $expansion) = unpack('VV', $data);
+        return $self->reject('driver queried absent EXP-32 cold junctions') if $expansion;
+        my @channels = grep { $base & (1 << $_) } 0 .. 31;
+        return join('', map { pack('f<', $self->cold_junction_value($_)) } @channels);
+    }
     return $self->reject(sprintf('unknown TCP command 0x%02x', $command));
 }
 
 sub channel_value {
     my ($self, $channel) = @_;
     return $self->{channel_values}{$channel} // $self->{temperature};
+}
+
+sub cold_junction_value {
+    my ($self, $channel) = @_;
+    return $self->{cold_junction_values}{$channel} // $self->{cold_junction};
+}
+
+sub set_cold_junction {
+    my ($self, $channel, $value) = @_;
+    die "cold-junction channel $channel is outside 0 to 31\n" unless $channel =~ /^\d+$/ && $channel <= 31;
+    $self->{cold_junction_values}{$channel} = $value;
+    return;
+}
+
+sub set_calibration_dates {
+    my ($self, %dates) = @_;
+    my %expected = (factory => 2, field => 4);
+    for my $kind (sort keys %dates) {
+        die "unknown calibration date kind $kind\n" unless exists $expected{$kind};
+        my $list = $dates{$kind};
+        die "$kind calibration dates need $expected{$kind} entries\n"
+            unless ref($list) eq 'ARRAY' && @$list == $expected{$kind};
+        for my $date (@$list) {
+            die "a calibration date needs six bytes\n"
+                unless ref($date) eq 'ARRAY' && @$date == 6 && !grep { !/^\d+$/ || $_ > 255 } @$date;
+        }
+        $self->{"${kind}_dates"} = [map { [@$_] } @$list];
+    }
+    return;
 }
 
 sub set_common_mode {
@@ -196,7 +241,8 @@ sub read_client {
         }
         my $mode = $selected ? $self->{fault}[1] : '';
         if ($selected) {
-            $self->{fault} = undef;
+            # A fault with a true third element stays armed until the test clears it.
+            $self->{fault} = undef unless $self->{fault}[2];
             my $now = clock_gettime(CLOCK_MONOTONIC);
             push @{$self->{faults}}, [$command, $mode, $now];
             $traffic->{fault} = $mode;
@@ -294,6 +340,6 @@ TC32 - External UDP/TCP TC32 fixture for the reconnect integration test
 
 =head1 DESCRIPTION
 
-Implements the discovery, digital input/output, temperature and configuration frames used by the real ULDAQ library. The fixture models a TC32 without EXP-32 and records unsupported requests as errors. A nonblocking event loop serves the sockets while the test waits for IOC output. EOF, incomplete response headers and receive timeout are injected at the network boundary. The timeout socket remains open for ten seconds after fault injection. The drop fault discards one request without closing the socket; subsequent requests receive normal responses. The bad-size fault returns a complete checksummed response with one unexpected payload byte. Request timestamps, connection numbers, payloads and complete response frames are retained as evidence. The temperature response returns the value of the C<temperature> key for every requested channel unless a per-channel value overrides it. C<set_common_mode(@channels)> makes the listed channels return -7777, which ULDAQ reports as the common-mode range error for those channels on every read, C<set_open(@channels)> and C<set_disabled(@channels)> make them return -8888 and -9999, which ULDAQ reports as an open thermocouple and as a disabled channel, and C<clear_channel_values(@channels)> removes the override. A temperature fault applies to the request whose channel mask includes channel 31, whether it reads one channel or many. The optional third constructor argument is a hash reference. Its C<mac> key sets the six-byte MAC address in the discovery reply. Its C<broadcast> key adds a wildcard UDP listener on the discovery port that records every broadcast discovery request with its monotonic time and replies, while the fixture is online, from the address-bound socket so the reply source is the device address. Broadcast replies are off by default, so cases that select a device by IP address keep their direct descriptor path. Every discovery request, broadcast or addressed, is retained in C<discovery_requests> with its source and online state.
+Implements the discovery, digital input/output, temperature and configuration frames used by the real ULDAQ library. The fixture models a TC32 without EXP-32 and records unsupported requests as errors. A nonblocking event loop serves the sockets while the test waits for IOC output. EOF, incomplete response headers and receive timeout are injected at the network boundary. The timeout socket remains open for ten seconds after fault injection. The drop fault discards one request without closing the socket; subsequent requests receive normal responses. The bad-size fault returns a complete checksummed response with one unexpected payload byte. Request timestamps, connection numbers, payloads and complete response frames are retained as evidence. The temperature response returns the value of the C<temperature> key for every requested channel unless a per-channel value overrides it. C<set_common_mode(@channels)> makes the listed channels return -7777, which ULDAQ reports as the common-mode range error for those channels on every read, C<set_open(@channels)> and C<set_disabled(@channels)> make them return -8888 and -9999, which ULDAQ reports as an open thermocouple and as a disabled channel, and C<clear_channel_values(@channels)> removes the override. A temperature fault applies to the request whose channel mask includes channel 31, whether it reads one channel or many. The cold-junction command 0x13 takes the base and the expansion channel mask as two little-endian 32-bit words, which is the frame of the real TC32 (captured on a real unit with 0xffffffff and 0 for the 32 channels and 1 and 0 for one channel), and answers one little-endian float for each requested base channel; a request with an expansion mask is recorded as an error and closes the connection. The cold-junction value of a channel is the C<cold_junction> key unless C<set_cold_junction($channel, $value)> overrides it, and C<cold_junction_value($channel)> returns the value in force. The commands 0x3A and 0x3C return the calibration dates, each as six bytes (year minus 2000, month, day, hour, minute, second): 0x3A the factory dates of the base and the expansion board, 0x3C the field dates of the base at 60 Hz, the base at 50 Hz, the expansion at 60 Hz and the expansion at 50 Hz. By default all six differ, so a case can tell them apart; C<set_calibration_dates(factory =E<gt> [$base, $expansion], field =E<gt> [$base60, $base50, $expansion60, $expansion50])> replaces either list with array references of six bytes each. A fault selected for the command 0x13 applies to its next request; the bad-size fault returns the answer with one unexpected byte. A fault array with a true third element, for example C<[0x13, 'bad-size', 1]>, is not cleared when it is used, so every later request of that command fails the same way until the test sets C<fault> to C<undef>. The optional third constructor argument is a hash reference. Its C<mac> key sets the six-byte MAC address in the discovery reply. Its C<broadcast> key adds a wildcard UDP listener on the discovery port that records every broadcast discovery request with its monotonic time and replies, while the fixture is online, from the address-bound socket so the reply source is the device address. Broadcast replies are off by default, so cases that select a device by IP address keep their direct descriptor path. Every discovery request, broadcast or addressed, is retained in C<discovery_requests> with its source and online state.
 
 =cut

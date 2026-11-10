@@ -1,0 +1,50 @@
+# Diagnostics of a network TC32 (board type ETH_TC32): the cold-junction temperature of each thermocouple
+# channel and, for the base bank, the mains rejection frequency, the calibration table and the factory and
+# field calibration dates. Load this file only for a network TC32, after TC32.substitutions, with the
+# macros P and PORT. TC32.substitutions also serves the USB TC-32, whose driver rejects these settings, so
+# it does not contain these records.
+
+file "$(MEASCOMP)/db/measCompTemperatureCJC.template"
+{
+pattern
+{    R, ADDR, PREC}
+{ Ti0,    0,    2}
+{ Ti1,    1,    2}
+{ Ti2,    2,    2}
+{ Ti3,    3,    2}
+{ Ti4,    4,    2}
+{ Ti5,    5,    2}
+{ Ti6,    6,    2}
+{ Ti7,    7,    2}
+{ Ti8,    8,    2}
+{ Ti9,    9,    2}
+{Ti10,   10,    2}
+{Ti11,   11,    2}
+{Ti12,   12,    2}
+{Ti13,   13,    2}
+{Ti14,   14,    2}
+{Ti15,   15,    2}
+{Ti16,   16,    2}
+{Ti17,   17,    2}
+{Ti18,   18,    2}
+{Ti19,   19,    2}
+{Ti20,   20,    2}
+{Ti21,   21,    2}
+{Ti22,   22,    2}
+{Ti23,   23,    2}
+{Ti24,   24,    2}
+{Ti25,   25,    2}
+{Ti26,   26,    2}
+{Ti27,   27,    2}
+{Ti28,   28,    2}
+{Ti29,   29,    2}
+{Ti30,   30,    2}
+{Ti31,   31,    2}
+}
+
+file "$(MEASCOMP)/db/measCompTemperatureBank.template"
+{
+pattern
+{    R, ADDR}
+{Bank0,    0}
+}

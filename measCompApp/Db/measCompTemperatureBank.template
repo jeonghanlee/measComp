@@ -1,0 +1,41 @@
+# Settings and calibration dates of one channel bank of a network TC32: the mains rejection frequency,
+# the calibration table, and the factory and field calibration dates. Load this template with the macros
+# P, R (the bank record name, for example Bank0), PORT and ADDR (0 for the base bank, 32 for the
+# expansion bank). The states of the two settings carry the values of the ULDAQ enumerators, 1 and 2.
+# The settings have no PINI, so an IOC start does not write them to the device. The driver restores the
+# last value written after a reconnect and publishes the value the device reports after each connection.
+record(mbbo,"$(P)$(R)RejectFreq")
+{
+    field(DTYP, "asynInt32")
+    field(OUT,  "@asyn($(PORT),$(ADDR))REJECT_FREQUENCY")
+    field(ZRVL, "1")
+    field(ZRST, "60 Hz")
+    field(ONVL, "2")
+    field(ONST, "50 Hz")
+}
+
+record(mbbo,"$(P)$(R)CalTable")
+{
+    field(DTYP, "asynInt32")
+    field(OUT,  "@asyn($(PORT),$(ADDR))CAL_TABLE_TYPE")
+    field(ZRVL, "1")
+    field(ZRST, "Factory")
+    field(ONVL, "2")
+    field(ONST, "Field")
+}
+
+record(stringin,"$(P)$(R)CalDateFactory")
+{
+    field(SCAN, "I/O Intr")
+    field(PINI, "YES")
+    field(DTYP, "asynOctetRead")
+    field(INP,  "@asyn($(PORT),$(ADDR))CAL_DATE_FACTORY")
+}
+
+record(stringin,"$(P)$(R)CalDateField")
+{
+    field(SCAN, "I/O Intr")
+    field(PINI, "YES")
+    field(DTYP, "asynOctetRead")
+    field(INP,  "@asyn($(PORT),$(ADDR))CAL_DATE_FIELD")
+}

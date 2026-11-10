@@ -1,0 +1,12 @@
+# Cold-junction temperature of one thermocouple channel of a network TC32, in Celsius.
+# The driver reads all cold-junction channels once per poll. Load this template with the macros
+# P, R (the channel record name, for example Ti0), PORT and ADDR (the channel number).
+record(ai,"$(P)$(R)ColdJunction")
+{
+    field(SCAN, "$(SCAN=I/O Intr)")
+    field(DTYP, "asynFloat64")
+    field(INP,  "@asyn($(PORT),$(ADDR))COLD_JUNCTION_VALUE")
+    field(PREC, "$(PREC=2)")
+    field(EGU,  "C")
+    field(MDEL, "-1")
+}

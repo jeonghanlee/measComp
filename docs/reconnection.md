@@ -212,6 +212,67 @@ previous behavior, for example
 `P=TEST:,R=T0,PORT=DAQ,ADDR=0,SCAN=I/O Intr,PREC=3,TSE=-2`. Use `TSE=-2` only
 with a network TC32: the other boards do not update the acquisition time.
 
+## Network TC32 diagnostics
+
+A network TC32 (board type `ETH_TC32`, which the record `<prefix>ModelNumber`
+shows as 306; a USB TC-32 shows 305) exposes four more items. They are in two
+templates that `TC32.substitutions` does not load, because that file serves the
+USB TC-32 too and its driver rejects these settings. The file
+`TC32Network.substitutions` loads them for the 32 channels and for bank 0, and
+`iocBoot/iocTC32/st.cmd` carries its `dbLoadTemplate` line commented out:
+
+```
+#dbLoadTemplate("$(MEASCOMP)/db/TC32Network.substitutions", "P=$(PREFIX),PORT=$(PORT)")
+```
+
+Remove the `#` for a TC32 reached over Ethernet; the records are in place when
+`caget <prefix>Ti0ColdJunction` returns a temperature. Leave the line commented
+out for a USB TC-32: its driver reads no cold-junction values and rejects a
+write to the two setting records with the message "This setting needs a network
+TC32".
+
+- **Cold-junction temperatures.** The record `<channel>ColdJunction`
+  (`measCompTemperatureCJC.template`, for example `Ti0ColdJunction`) shows the
+  cold-junction temperature of its channel in Celsius whatever the scale of the
+  channel. The driver reads all 32 values once per poll with one `ulTInArray()`
+  call over the cold-junction channels, which are the channel numbers offset by
+  0x80, so a poll costs one more request. A failed read that is not a lost
+  connection makes only these records INVALID and leaves the temperature records
+  alone; it is reported as described under Persistent thermocouple read errors
+  below, with one line in the IOC log when it starts and one when it ends, and
+  `LAST_ERROR_MESSAGE` names it while it lasts. A lost connection disconnects
+  the port.
+- **Mains rejection frequency and calibration table.**
+  `Bank0RejectFreq` sets the mains rejection frequency of the base bank, with the
+  states 60 Hz (value 1) and 50 Hz (value 2), and `Bank0CalTable` sets its
+  calibration table, with the states Factory (value 1) and Field (value 2); both
+  are in `measCompTemperatureBank.template`, and the values are the ULDAQ
+  enumerators. A record offers only its two states. The driver parameters behind
+  them are `REJECT_FREQUENCY` and `CAL_TABLE_TYPE`; any other value written to a
+  parameter is rejected with an error before the device is touched, and the
+  readback keeps its value. A readback changes only after the device accepted a
+  write. The records have no `PINI`, so an IOC start does not write them, and an
+  IOC restart forgets the values written: the device reports its own setting
+  after the connection, and a setting that must hold at every start has to be
+  written again once the IOC is up. Each setting is one bit of the measurement
+  byte of its bank, beside the open thermocouple detection, and the driver
+  changes only its own bit. Within one IOC run the last value written is written
+  again after a reconnect, and the value the device reports is published after
+  every connection. The base bank is the channels 0 to 31 (address 0) and the
+  expansion bank the channels from 32 (address 32), the split that the open
+  thermocouple detection uses; no record is provided for the expansion bank,
+  whose code path has not been exercised.
+- **Calibration dates.** The records `Bank0CalDateFactory` and `Bank0CalDateField`
+  show the factory and field calibration dates as ULDAQ returns them: the local
+  time formatted with `%c`, for example `Thu Mar 11 03:38:19 2021` in the C
+  locale. They are read after every connection. ULDAQ picks the field date of the
+  base bank at the connection from the rejection frequency the device reports
+  then and keeps it until the next connection, so the field date does not change
+  when the rejection frequency is changed, and after a reconnect that lost the
+  device configuration it is the 60 Hz date although the driver then restores 50
+  Hz. The factory and field date of a unit can be equal; the real TC32 used for
+  the verification reports the same date for both.
+
 ## Persistent thermocouple read errors
 
 When a thermocouple channel keeps returning the same error, as a TC32 channel
@@ -296,7 +357,17 @@ and with three runs of scales, counts the temperature requests of each poll,
 and checks the scale of each channel, the timestamp of the records, an open, a
 common-mode and a disabled channel in one request, the default of the `TSE`
 macro, a request that fails without a connection error, and a transport error.
-A power-off and a network disconnect of one TC-32 were observed on real
+The temperature-diagnostics case checks one cold-junction request for every
+poll, the cold-junction records against distinct fixture values and a change,
+the rejection frequency and the calibration table bit by bit in the
+measurement byte beside an open detection, their restoration after a reconnect
+that lost the device configuration, the factory and field dates and the rule
+for the field date, the rejection of the values 0 and 3 before the
+device is touched, and a failed cold-junction read that marks only the
+cold-junction records. A cold-junction read of a real TC32, one request for the
+32 channels that took about 1 ms, was observed on real hardware; the
+settings were not written there and the fixture dates differ where the real
+unit's do not. A power-off and a network disconnect of one TC-32 were observed on real
 hardware with a running IOC, and so was a device that stays linked and stops
 answering: the connection retries, the records and `LAST_ERROR_MESSAGE` followed
 the rules above and the records recovered at the next retry, a change of the

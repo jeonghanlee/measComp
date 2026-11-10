@@ -39,7 +39,8 @@ my %CASES = map { $_ => 1 } qw(reconnect digital-word digital-control digital-po
     bounds-tc32-online bounds-tc32-offline bounds-e1608-online bounds-e1608-offline
     mac-tc32-online mac-tc32-offline mac-two-ports mac-known-absent
     endpoint-same-ip endpoint-mixed endpoint-distinct-ip endpoint-default-port endpoint-alt-port
-    endpoint-hostname endpoint-hostname-port endpoint-wrong-port silent-device read-error temperature-array);
+    endpoint-hostname endpoint-hostname-port endpoint-wrong-port silent-device read-error temperature-array
+    temperature-diagnostics);
 my $ALT_DISCOVERY_PORT = 54221;
 my $UNUSED_DISCOVERY_PORT = 54231;
 my $SILENT_ADDRESS = '192.0.2.3';
@@ -60,6 +61,14 @@ my $ARRAY_MIN_POLLS = 20;
 my $ARRAY_SCALE_MASKS = '00000001,7ffffffe,80000000';
 my $TIMESTAMP_TOLERANCE = 2;
 my $ARRAY_CHANNEL_COUNT = 32;
+my $DIAG_WINDOW = 3;
+my $DIAG_SETTLE = 1;
+my $DIAG_MIN_POLLS = 20;
+my $DIAG_MASKS = 'ffffffff-00000000';
+my $DIAG_FAILURE_WINDOW = 3;
+my $DIAG_OPEN_DETECT_BIT = 0x01;
+my $DIAG_REJECT_BIT = 0x02;
+my $DIAG_CAL_BIT = 0x04;
 my $EPICS_EPOCH_OFFSET = 631152000;
 my $FIXTURE_HOSTNAME = 'fixture-a';
 my @ANALOG_FIELDS = qw(bounds_status low high raw value slope offset egul eguf udf severity pact linear timestamp);
@@ -1294,6 +1303,235 @@ sub exercise_array {
     return;
 }
 
+# The temperature-diagnostics case checks the cold-junction temperatures, the mains rejection frequency,
+# the calibration table and the calibration dates of a network TC32: one cold-junction request for every
+# poll, records that follow the fixture, settings that change only their own bit of the measurement byte
+# and come back after a reconnect that lost the device configuration, the dates read after each
+# connection, values other than the two valid ones rejected before the device is touched, and a failed
+# cold-junction read that marks only the cold-junction records.
+sub diagnostic_polls {
+    my ($device, $from, $to) = @_;
+    my ($digital, $requests, %masks) = (0, 0);
+    for my $entry (grep { $_->{time} >= $from && $_->{time} <= $to } @{$device->{traffic}}) {
+        if ($entry->{command} == 0x00) { $digital++; }
+        elsif ($entry->{command} == 0x13) {
+            my ($base, $expansion) = unpack('VV', pack('H*', $entry->{payload}));
+            $requests++;
+            $masks{sprintf('%08x-%08x', $base, $expansion)} = 1;
+        }
+    }
+    return {polls => $digital, requests => $requests, masks => join(',', sort keys %masks)};
+}
+
+sub measurement {
+    my ($device, $bank) = @_;
+    return ord(substr($device->{measure}, $bank // 0, 1));
+}
+
+sub config_writes {
+    my ($device) = @_;
+    return scalar grep { $_->{command} == 0x19 } @{$device->{traffic}};
+}
+
+# The text of a calibration date as ULDAQ returns it: the local time formatted with %c. The date is the six
+# bytes the device sends, with the year counted from 2000. The IOC never sets a locale, so it formats in the
+# C locale, and the expected text must too, whatever locale the test runs in.
+sub date_text {
+    my ($date) = @_;
+    my ($year, $month, $day, $hour, $minute, $second) = @$date;
+    POSIX::setlocale(POSIX::LC_TIME(), 'C') or die "cannot select the C locale: $!\n";
+    return POSIX::strftime('%c', $second, $minute, $hour, $day, $month - 1, $year + 100);
+}
+
+sub string_value {
+    my ($run, $record) = @_;
+    my $line = command($run, "STRING $record", 'STRING');
+    $line =~ /\ASTRING(?: (.*))?\z/ or die "malformed IOC string: $line\n";
+    return $1 // '';
+}
+
+sub setting_value {
+    my ($run, $parameter) = @_;
+    my $line = command($run, "READSET $parameter", 'SETTING');
+    $line =~ /\ASETTING (-?\d+) (-?\d+)\z/ or die "malformed IOC setting: $line\n";
+    return {status => 0 + $1, value => 0 + $2};
+}
+
+sub wait_condition {
+    my ($run, $test, $timeout) = @_;
+    my $deadline = now() + ($timeout // $READ_TIMEOUT);
+    while (now() < $deadline) {
+        return 1 if $test->();
+        pause($run, 0.05);
+    }
+    return 0;
+}
+
+sub wait_record {
+    my ($run, $record, $value) = @_;
+    my $deadline = now() + $READ_TIMEOUT;
+    my $last;
+    while (now() < $deadline) {
+        $last = record_values($run, $record);
+        return $last if abs($last->{value} - $value) < 0.001 && $last->{severity} == 0 && $last->{undefined} == 0;
+        pause($run, 0.1);
+    }
+    return $last;
+}
+
+sub wait_string {
+    my ($run, $record, $text) = @_;
+    my $deadline = now() + $READ_TIMEOUT;
+    my $last = '';
+    while (now() < $deadline) {
+        $last = string_value($run, $record);
+        return $last if $last eq $text;
+        pause($run, 0.1);
+    }
+    return $last;
+}
+
+# Drops the connection, lets the device forget its configuration when asked, and waits for the port to
+# come back.
+sub reconnect_device {
+    my ($run, $lose_configuration) = @_;
+    my $device = $run->{device};
+    $device->{fault} = [0x12, 'eof'];
+    wait_for($run, sub { my ($state) = @_; return $state->{connected} == 0; });
+    if ($lose_configuration) {
+        $device->{types} = chr(1) x 64;
+        $device->{measure} = "\x01\x01";
+    }
+    $device->{online} = 1;
+    return healthy($run, $device->{temperature});
+}
+
+sub exercise_diagnostics {
+    my ($run) = @_;
+    my $device = $run->{device};
+    read_prefix($run, 'READY');
+    healthy($run, 22.5);
+    my @factory = map { [@$_] } @{$device->{factory_dates}};
+    my @field = map { [@$_] } @{$device->{field_dates}};
+
+    # One cold-junction request for all 32 channels in every poll.
+    my $from = now();
+    pause($run, $DIAG_WINDOW);
+    my $window = diagnostic_polls($device, $from, now());
+    check($run, 'temperature diagnostics one cold-junction request per poll', $window->{polls} >= $DIAG_MIN_POLLS
+        && abs($window->{requests} - $window->{polls}) <= 1 && $window->{masks} eq $DIAG_MASKS,
+        $window);
+
+    # The cold-junction records show the fixture's value of each channel and follow a change.
+    $device->set_cold_junction(0, 24.25);
+    $device->set_cold_junction(31, 33.75);
+    my ($first, $last) = (wait_record($run, 'TEST:T0ColdJunction', 24.25), wait_record($run, 'TEST:T31ColdJunction', 33.75));
+    check($run, 'temperature diagnostics cold-junction records show the fixture values',
+        abs($first->{value} - 24.25) < 0.001 && abs($last->{value} - 33.75) < 0.001
+        && $first->{severity} == 0 && $last->{severity} == 0, {channel0 => $first, channel31 => $last});
+    $device->set_cold_junction(0, 25.5);
+    $device->set_cold_junction(31, 34.5);
+    ($first, $last) = (wait_record($run, 'TEST:T0ColdJunction', 25.5), wait_record($run, 'TEST:T31ColdJunction', 34.5));
+    check($run, 'temperature diagnostics cold-junction records follow a change',
+        abs($first->{value} - 25.5) < 0.001 && abs($last->{value} - 34.5) < 0.001, {channel0 => $first, channel31 => $last});
+    my $temperature = record_values($run, 'TEST:T0');
+    check($run, 'temperature diagnostics temperature records are not changed by the cold junction',
+        abs($temperature->{value} - 22.5) < 0.001 && $temperature->{severity} == 0, $temperature);
+
+    # The dates read at the first connection are the fixture's: the field date is the 60 Hz one.
+    my ($factory_text, $field_text) = (date_text($factory[0]), date_text($field[0]));
+    check($run, 'temperature diagnostics factory date is the fixture factory date',
+        wait_string($run, 'TEST:Bank0CalDateFactory', $factory_text) eq $factory_text, $factory_text);
+    check($run, 'temperature diagnostics field date is the fixture 60 Hz field date',
+        wait_string($run, 'TEST:Bank0CalDateField', $field_text) eq $field_text, $field_text);
+
+    # Each setting changes only its own bit of the measurement byte, beside an open detection set before.
+    check($run, 'temperature diagnostics open detection written', command($run, 'OTD 0') eq 'RESULT 0'
+        && measurement($device) == $DIAG_OPEN_DETECT_BIT, unpack('H*', $device->{measure}));
+    check($run, 'temperature diagnostics rejection frequency set from its record', put_ok($run, 'TEST:Bank0RejectFreq', 1)
+        && wait_condition($run, sub { measurement($device) == ($DIAG_OPEN_DETECT_BIT | $DIAG_REJECT_BIT); }),
+        unpack('H*', $device->{measure}));
+    check($run, 'temperature diagnostics calibration table set from its record', put_ok($run, 'TEST:Bank0CalTable', 1)
+        && wait_condition($run, sub {
+            measurement($device) == ($DIAG_OPEN_DETECT_BIT | $DIAG_REJECT_BIT | $DIAG_CAL_BIT); }),
+        unpack('H*', $device->{measure}));
+    my ($reject, $table) = (setting_value($run, 'REJECT_FREQUENCY'), setting_value($run, 'CAL_TABLE_TYPE'));
+    check($run, 'temperature diagnostics settings read back', $reject->{status} == 0 && $reject->{value} == 2
+        && $table->{status} == 0 && $table->{value} == 2 && measurement($device, 1) == 0,
+        {rejection => $reject, table => $table, expansion => measurement($device, 1)});
+    my $held = string_value($run, 'TEST:Bank0CalDateField');
+    check($run, 'temperature diagnostics field date does not follow a setting without a reconnect',
+        $held eq $field_text, {field => $held, expected => $field_text});
+
+    # A reconnect after which the device lost its configuration: the settings come back and both dates
+    # are read again; ULDAQ picks the field date from the rejection frequency the device reports at the
+    # connection, which is 60 Hz, although 50 Hz is restored afterwards.
+    my @changed_factory = ([22, 5, 6, 7, 8, 9], $factory[1]);
+    my @changed_field = ([25, 1, 2, 3, 4, 5], $field[1], $field[2], $field[3]);
+    $device->set_calibration_dates(factory => \@changed_factory, field => \@changed_field);
+    reconnect_device($run, 1);
+    check($run, 'temperature diagnostics settings are written again after a reconnect that lost them',
+        wait_condition($run, sub {
+            measurement($device) == ($DIAG_OPEN_DETECT_BIT | $DIAG_REJECT_BIT | $DIAG_CAL_BIT); }),
+        unpack('H*', $device->{measure}));
+    ($reject, $table) = (setting_value($run, 'REJECT_FREQUENCY'), setting_value($run, 'CAL_TABLE_TYPE'));
+    check($run, 'temperature diagnostics readbacks come back after the reconnect', $reject->{value} == 2
+        && $table->{value} == 2, {rejection => $reject, table => $table});
+    ($factory_text, $field_text) = (date_text($changed_factory[0]), date_text($changed_field[0]));
+    check($run, 'temperature diagnostics factory date is read again after a reconnect',
+        wait_string($run, 'TEST:Bank0CalDateFactory', $factory_text) eq $factory_text, $factory_text);
+    check($run, 'temperature diagnostics field date stays the 60 Hz date after a reconnect that lost the settings',
+        wait_string($run, 'TEST:Bank0CalDateField', $field_text) eq $field_text, $field_text);
+
+    # A reconnect after which the device kept its configuration: the field date becomes the 50 Hz date.
+    reconnect_device($run, 0);
+    $field_text = date_text($changed_field[1]);
+    check($run, 'temperature diagnostics field date becomes the 50 Hz date after a reconnect that kept the settings',
+        wait_string($run, 'TEST:Bank0CalDateField', $field_text) eq $field_text, $field_text);
+
+    # A value other than the two valid ones is rejected before the device is touched.
+    my ($writes, $byte) = (config_writes($device), measurement($device));
+    my @results = map { command($run, "WRITESET $_->[0] $_->[1]") }
+        (['REJECT_FREQUENCY', 0], ['REJECT_FREQUENCY', 3], ['CAL_TABLE_TYPE', 0], ['CAL_TABLE_TYPE', 3]);
+    ($reject, $table) = (setting_value($run, 'REJECT_FREQUENCY'), setting_value($run, 'CAL_TABLE_TYPE'));
+    check($run, 'temperature diagnostics invalid values are rejected', !grep({ $_ eq 'RESULT 0' } @results)
+        && config_writes($device) == $writes && measurement($device) == $byte
+        && $reject->{value} == 2 && $table->{value} == 2,
+        {results => \@results, writes => config_writes($device) - $writes, byte => measurement($device)});
+
+    # A failed cold-junction read marks only the cold-junction records and is reported once.
+    my $mark = scalar @{$run->{driver_lines}};
+    $device->{fault} = [0x13, 'bad-size', 1];
+    pause($run, $DIAG_FAILURE_WINDOW);
+    my ($failed_first, $failed_last) = (record_values($run, 'TEST:T0ColdJunction'), record_values($run, 'TEST:T31ColdJunction'));
+    my $failed_state = state($run);
+    my $failed_temperature = record_values($run, 'TEST:T0');
+    my @starts = grep { /Calling TIn cold junction/ } driver_lines_since($run, $mark);
+    my $message = last_message($run);
+    check($run, 'temperature diagnostics a failed cold-junction read marks only the cold-junction records',
+        $failed_first->{severity} == 3 && $failed_last->{severity} == 3 && $failed_state->{connected} == 1
+        && $failed_state->{severity} == 0 && $failed_state->{severity31} == 0
+        && abs($failed_temperature->{value} - 22.5) < 0.001 && $failed_temperature->{severity} == 0,
+        {cold_junction => [$failed_first->{severity}, $failed_last->{severity}], state => $failed_state});
+    check($run, 'temperature diagnostics a persistent cold-junction failure is reported once', @starts == 1, [@starts]);
+    check($run, 'temperature diagnostics LAST_ERROR_MESSAGE names the cold junction',
+        $message->{status} == 0 && $message->{text} =~ /cold junction/i, $message);
+    $device->{fault} = undef;
+    wait_record($run, 'TEST:T0ColdJunction', 25.5);
+    healthy($run, 22.5);
+    pause($run, $DIAG_SETTLE);
+    my @ends = grep { /Cold junction read returned to normal/ } driver_lines_since($run, $mark);
+    $message = last_message($run);
+    check($run, 'temperature diagnostics the cold-junction records recover and report it once', @ends == 1
+        && record_values($run, 'TEST:T0ColdJunction')->{severity} == 0 && $message->{text} eq '',
+        {ends => [@ends], message => $message});
+    check($run, 'temperature diagnostics fixture commands supported', !@{$device->{errors}}, $device->{errors});
+    print {$run->{input}} "QUIT\n" or die "IOC input write: $!\n";
+    wait_exit($run, $EXIT_TIMEOUT) or die "IOC exit deadline exceeded\n";
+    check($run, 'temperature diagnostics IOC exits normally', $run->{ioc_exit} == 0, $run->{ioc_exit});
+    return;
+}
+
 sub digital_window {
     my ($run) = @_;
     my $device = $run->{device};
@@ -1308,6 +1546,11 @@ sub digital_window {
             next unless $request->{command} == 0x12;
             my (undef, undef, $channels) = unpack('CCV', pack('H*', $request->{payload}));
             next unless $channels & 0x80000000;
+            # A network TC32 ends its poll with the cold-junction request, which belongs to this poll and
+            # must come before the window starts.
+            my $until = now() + 1;
+            while (now() < $until && $cursor >= @{$device->{traffic}}) { pump($run, 0.005); }
+            $cursor++ if $cursor < @{$device->{traffic}} && $device->{traffic}[$cursor]{command} == 0x13;
             my $observed = state($run);
             check($run, 'digital observation starts after a healthy poll',
                 $observed->{connected} == 1 && $observed->{severity} == 0
@@ -1609,7 +1852,10 @@ sub main {
         if ($case =~ /\Amac-/) { setup_mac($run); }
         elsif ($case =~ /\Aendpoint-/) { setup_endpoint($run); }
         elsif ($case eq 'silent-device') { setup_silent($run); }
-        elsif ($case eq 'read-error' || $case eq 'temperature-array') { $run->{device} = TC32->new(); $run->{device}{online} = 1; }
+        elsif ($case eq 'read-error' || $case eq 'temperature-array' || $case eq 'temperature-diagnostics') {
+            $run->{device} = TC32->new();
+            $run->{device}{online} = 1;
+        }
         else { $run->{device} = ($run->{model} // '') eq 'e1608' ? E1608->new() : TC32->new(); }
         $run->{device}{online} = 1 if $case =~ /-online\z/;
         launch_ioc($run, $executable, $dbd, $template);
@@ -1620,6 +1866,7 @@ sub main {
         elsif ($case eq 'silent-device') { exercise_silent($run); }
         elsif ($case eq 'read-error') { exercise_read_error($run); }
         elsif ($case eq 'temperature-array') { exercise_array($run); }
+        elsif ($case eq 'temperature-diagnostics') { exercise_diagnostics($run); }
         elsif ($case =~ /\Amac-/) { exercise_mac($run); }
         elsif ($run->{model}) { exercise_enums($run); }
         elsif ($case eq 'reconnect') { exercise($run); }
@@ -1667,7 +1914,7 @@ Print usage and exit successfully.
 
 =item --case NAME
 
-Select reconnect (default), digital-word, digital-control, digital-policy, digital-bits, enum-tc32-online, enum-tc32-offline, enum-e1608-online, enum-e1608-offline, enum-e1608-init, bounds-tc32-online, bounds-tc32-offline, bounds-e1608-online, bounds-e1608-offline, mac-tc32-online, mac-tc32-offline, mac-two-ports, mac-known-absent, endpoint-same-ip, endpoint-mixed, endpoint-distinct-ip, endpoint-default-port, endpoint-alt-port, endpoint-hostname, endpoint-hostname-port, endpoint-wrong-port, silent-device, read-error or temperature-array. Each invocation creates a fresh IOC and its external fixtures.
+Select reconnect (default), digital-word, digital-control, digital-policy, digital-bits, enum-tc32-online, enum-tc32-offline, enum-e1608-online, enum-e1608-offline, enum-e1608-init, bounds-tc32-online, bounds-tc32-offline, bounds-e1608-online, bounds-e1608-offline, mac-tc32-online, mac-tc32-offline, mac-two-ports, mac-known-absent, endpoint-same-ip, endpoint-mixed, endpoint-distinct-ip, endpoint-default-port, endpoint-alt-port, endpoint-hostname, endpoint-hostname-port, endpoint-wrong-port, silent-device, read-error, temperature-array or temperature-diagnostics. Each invocation creates a fresh IOC and its external fixtures.
 
 Enum cases compare all record enum states with public driver reads and model-specific expected values, write every supported selection through the record, and check RVAL, SDEF, asynchronous completion, alarm severity and public driver readback. They repeat two transport failures and reconnects. The init case holds the real IOC after record initialization, enables device responses, proves connection while interruptAccept is zero, and resumes IOC initialization.
 
@@ -1682,6 +1929,8 @@ The silent-device case runs a healthy TC32 port beside a second TC32 whose addre
 The read-error case switches a persistent common-mode condition on for channels 0 and 31 of a healthy TC32 and counts the driver's lines over an 8-second window of at least 100 polls. It requires one error line per channel that names the channel, INVALID records with their held value and LAST_ERROR_MESSAGE naming the condition. It injects a different error on channel 31 while its condition lasts and requires a new line for that error and another when the common-mode error returns. It forces a reconnect while the condition lasts and requires one new line per channel, switches the condition off on channel 0 and requires one line for its return to normal with the message unchanged, then off on channel 31, and requires its line and a cleared message.
 
 The temperature-array case checks that a network TC32 is read with one request for all channels when they share a temperature scale and with three requests when channel 0 is at Fahrenheit and channel 31 at Kelvin, counted from the fixture traffic against the digital read of each poll. It requires each channel to keep its own scale, the records of one poll to carry the time of that poll and to advance with it, an open channel to read -9999 and stay valid beside a disabled channel that reads -11111 and a common-mode channel that is invalid with its held value, the TSE macro of the template to default to 0, a request that fails without a connection error to fail every channel and keep the port connected, a transport error to fail every channel, and the port to recover.
+
+The temperature-diagnostics case checks the cold-junction temperatures, the mains rejection frequency, the calibration table and the calibration dates of a network TC32. It counts the cold-junction requests of polls against the digital read of each poll and checks their channel mask, compares the cold-junction records of channels 0 and 31 with distinct fixture values and follows a change, sets the open detection and then the rejection frequency and the calibration table and checks that each changes only its own bit of the measurement byte, forces a connection error with the device configuration reset and requires the bits and the readbacks to come back, and compares the factory and field date strings with strings built from the fixture dates in the format ULDAQ returns, the local time formatted with %c. It checks the field date in three steps: it stays the 60 Hz date when the rejection frequency is set without a reconnect, it stays the 60 Hz date after a reconnect that lost the device configuration although 50 Hz is restored, and it becomes the 50 Hz date after a reconnect that kept the configuration. It writes 0 and 3 to each setting through the IOC and requires both writes to be rejected with the measurement byte and the readback unchanged and no configuration write on the wire. It also makes every cold-junction read fail with the bad-size fault kept armed and checks that only the cold-junction records go to error, that the failure is reported once, and that the records recover with one return-to-normal line. It requires the IOC to exit normally.
 
 =back
 

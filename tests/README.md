@@ -460,6 +460,53 @@ single-request read, as described for the MAC cases, and run the same command
 from its root. It must fail `temperature array one request per poll`, because
 that driver issues one request for each of the 32 channels of a poll.
 
+## Temperature diagnostics case
+
+`temperature-diagnostics` runs a healthy TC32 and checks the four items of the
+network TC32 diagnostics: the cold-junction temperatures, the mains rejection
+frequency, the calibration table and the calibration dates. The test IOC loads
+`measCompTemperatureCJC.template` for the channels 0 and 31 and
+`measCompTemperatureBank.template` for bank 0, from the directory of the
+temperature template, `measCompApp/Db`. The case counts the cold-junction requests of the fixture
+against the digital reads, one per poll, and requires one request for each poll
+with the mask of all 32 base channels and an empty expansion mask. It gives
+channels 0 and 31 distinct fixture values, requires the records to show them and
+follow a change, and requires the temperature records to stay unchanged. It
+compares the factory and field date records with the text that ULDAQ builds from
+the fixture dates, the local time formatted with `%c` in the C locale. It sets the
+open detection to disabled and then the rejection frequency and the calibration
+table through their records and requires each to change only its own bit of the
+measurement byte, which has the open detection in bit 0, the rejection in bit 1
+and the table in bit 2. It forces a connection error with a device that has lost
+its configuration and requires the bits and the readbacks to come back, and the
+dates to be read again. The field date must stay the 60 Hz date when the rejection
+frequency is changed without a reconnect and after a reconnect that lost the
+configuration, and become the 50 Hz date after a reconnect after which the
+device kept its configuration. It writes
+0 and 3 to each setting through the IOC and requires all four writes to fail with
+no configuration write on the wire and the byte and the readback unchanged. At the
+end it keeps the bad-size fault armed on the cold-junction command and requires
+only the cold-junction records to go INVALID, the failure to be reported once,
+`LAST_ERROR_MESSAGE` to name the cold junction, and the records to recover with
+one return-to-normal line. The case takes about 15 seconds and runs in the
+namespace shell of the other cases:
+
+```bash
+export TEMPLATE="$PWD/measCompApp/Db/measCompTemperatureIn.template"
+export IOC="$BUILD/reconnect-ioc"
+export DBD="$BUILD/reconnect.dbd"
+export RUNNER="$PWD/tests/test_reconnect.pl"
+timeout 120s perl "$RUNNER" --case temperature-diagnostics "$IOC" "$DBD" "$TEMPLATE" "$BUILD/temperature-diagnostics.log"
+exit
+```
+
+For the original-behavior control, build a scratch copy whose
+`measCompApp/src/drvMultiFunction.cpp` is the version from before the
+diagnostics, as described for the MAC cases, and run the same command from its
+root, with the new templates and test files of this change in place. It must fail
+`temperature diagnostics one cold-junction request per poll`, because that driver
+issues no cold-junction request.
+
 ## Exit loop
 
 The driver stops and joins each port's poller thread in an exit handler, so
@@ -566,6 +613,13 @@ driver defect.
 | `tin-run-failure` | Treat the data of a request that failed for another reason as per-channel results | `temperature array request failure fails every channel and keeps the port connected` in `temperature-array` |
 | `tin-tse-default` | Change the default of the `TSE` macro in the temperature template to -2 | `temperature array TSE macro defaults to 0` in `temperature-array` |
 | `tin-call-status` | Give every channel of a request the status of the call | `temperature array open channel reads -9999 and stays valid` in `temperature-array` |
+| `no-cold-junction-read` | Skip the `readColdJunctions()` call in the poll loop | `temperature diagnostics one cold-junction request per poll` in `temperature-diagnostics` |
+| `no-bank-restore` | Do not keep the written rejection frequency and calibration table for the restore after a reconnect | `temperature diagnostics settings are written again after a reconnect that lost them` in `temperature-diagnostics` |
+| `swapped-dates` | Publish the factory date as the field date and the field date as the factory date | `temperature diagnostics factory date is the fixture factory date` in `temperature-diagnostics` |
+| `cold-junction-marks-temperature` | Mark the temperature records too when the cold-junction read fails | `temperature diagnostics a failed cold-junction read marks only the cold-junction records` in `temperature-diagnostics` |
+| `no-value-check` | Remove the check of the value in `setBankConfig()`, so any integer reaches the device | `temperature diagnostics invalid values are rejected` in `temperature-diagnostics` |
+| `no-date-reread` | Read the bank information after the first connection only | `temperature diagnostics factory date is read again after a reconnect` in `temperature-diagnostics` |
+| `swapped-items` | Write the rejection frequency to the calibration table item of the device and the table to the rejection item | `temperature diagnostics rejection frequency set from its record` in `temperature-diagnostics` |
 
 This test does not establish hardware power-cycle behavior, sustained network
 loss endurance, Channel Access client reconnection, EXP-32, USB or Windows support.

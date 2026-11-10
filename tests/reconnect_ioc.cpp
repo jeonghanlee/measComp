@@ -186,6 +186,33 @@ static void readMessage()
     std::printf("MESSAGE %d %s\n", status, buffer);
 }
 
+// Prints the string value of a record by name.
+static void readString(const char *record)
+{
+    DBADDR address;
+    char buffer[MAX_STRING_SIZE + 1] = "";
+    std::string name(record);
+    name += ".VAL";
+    if (dbNameToAddr(name.c_str(), &address)) {
+        std::puts("STRINGERROR record missing");
+        return;
+    }
+    dbScanLock(address.precord);
+    long status = dbGetField(&address, DBR_STRING, buffer, 0, 0, 0);
+    dbScanUnlock(address.precord);
+    buffer[MAX_STRING_SIZE] = '\0';
+    if (status) std::puts("STRINGERROR read failed");
+    else std::printf("STRING %s\n", buffer);
+}
+
+// Prints the driver's cached value of an integer parameter, read through the public asynInt32 interface.
+static void readSetting(const char *parameter, int address)
+{
+    epicsInt32 value = -1;
+    asynStatus status = pasynInt32SyncIO->readOnce("DAQ", address, &value, 2.0, parameter);
+    std::printf("SETTING %d %d\n", status, value);
+}
+
 static void readAnalog(int addr, const char *record)
 {
     epicsInt32 low = 0, high = 0;
@@ -309,6 +336,15 @@ int main(int argc, char **argv)
         if (dbLoadRecords(argv[2], "P=TEST:,R=T1,PORT=DAQ,ADDR=1,SCAN=I/O Intr,PREC=3,TSE=-2")) return 6;
         if (dbLoadRecords(argv[2], "P=TEST:,R=T2,PORT=DAQ,ADDR=2,SCAN=I/O Intr,PREC=3")) return 6;
         if (dbLoadRecords(argv[2], "P=TEST:,R=T31,PORT=DAQ,ADDR=31,SCAN=I/O Intr,PREC=3,TSE=-2")) return 6;
+        // The records of the network TC32 diagnostics: the cold-junction temperature of channels 0 and 31
+        // and the settings and dates of bank 0, from the directory of the temperature template.
+        std::string directory(argv[2]);
+        directory = directory.substr(0, directory.find_last_of('/') + 1);
+        std::string cjcTemplate = directory + "measCompTemperatureCJC.template";
+        std::string bankTemplate = directory + "measCompTemperatureBank.template";
+        if (dbLoadRecords(cjcTemplate.c_str(), "P=TEST:,R=T0,PORT=DAQ,ADDR=0,PREC=3")) return 6;
+        if (dbLoadRecords(cjcTemplate.c_str(), "P=TEST:,R=T31,PORT=DAQ,ADDR=31,PREC=3")) return 6;
+        if (dbLoadRecords(bankTemplate.c_str(), "P=TEST:,R=Bank0,PORT=DAQ,ADDR=0")) return 6;
         if (dbLoadRecords(argv[4], "P=TEST:,R=D0,PORT=DAQ,ADDR=0,MASK=1")) return 6;
         if (secondPort && dbLoadRecords(argv[2], "P=TEST:,R=B0,PORT=DAQ2,ADDR=0,SCAN=I/O Intr,PREC=3")) return 6;
     }
@@ -338,6 +374,12 @@ int main(int argc, char **argv)
             putNumber(record, number);
         else if (std::sscanf(command, "ENUM %d %63s %63s", &value, parameter, record) == 3)
             readEnums(value, parameter, record);
+        else if (std::sscanf(command, "WRITESET %63s %d", parameter, &value) == 2)
+            std::printf("RESULT %d\n", writeSetting(parameter, value));
+        else if (std::sscanf(command, "READSET %63s", parameter) == 1)
+            readSetting(parameter, 0);
+        else if (std::sscanf(command, "STRING %63s", record) == 1)
+            readString(record);
         else if (std::sscanf(command, "ENUMSET %63s %d", record, &value) == 2)
             std::printf("RESULT %ld\n", writeEnumRecord(record, value));
         else if (std::sscanf(command, "ENUMVALUE %d %63s %63s", &value, parameter, record) == 3)

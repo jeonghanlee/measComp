@@ -121,6 +121,8 @@ sub main {
     my @members = (@sources, "$repository/measCompApp/src/measCompDiscover.h",
         "$repository/measCompApp/src/devMeasComp.dbd",
         "$repository/measCompApp/Db/measCompTemperatureIn.template",
+        "$repository/measCompApp/Db/measCompTemperatureCJC.template",
+        "$repository/measCompApp/Db/measCompTemperatureBank.template",
         "$repository/measCompApp/Db/measCompBinaryIn.template",
         "$repository/measCompApp/Db/measCompAnalogIn.template",
         "$repository/measCompApp/Db/measCompVoltageIn.template",

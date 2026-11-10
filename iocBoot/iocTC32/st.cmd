@@ -19,6 +19,11 @@ MultiFunctionConfig("$(PORT)", "$(UNIQUE_ID)", 1, 1)
 
 dbLoadTemplate("$(MEASCOMP)/db/TC32.substitutions", "P=$(PREFIX),PORT=$(PORT)")
 
+## Network TC32 only: the cold-junction temperatures, the mains rejection frequency, the calibration table
+## and the calibration dates. Enable this line for a TC32 reached over Ethernet; do not enable it for a
+## USB TC-32, whose driver rejects these settings.
+#dbLoadTemplate("$(MEASCOMP)/db/TC32Network.substitutions", "P=$(PREFIX),PORT=$(PORT)")
+
 < ../save_restore.cmd
 
 iocInit

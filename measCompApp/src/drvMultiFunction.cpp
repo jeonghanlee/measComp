@@ -155,6 +155,15 @@ typedef enum {
 #define temperatureFilterString   "TEMPERATURE_FILTER"
 #define temperatureSensorString   "TEMPERATURE_SENSOR"
 #define temperatureWiringString   "TEMPERATURE_WIRING"
+// Diagnostics of the network TC32: the cold-junction temperature of each channel, and for each channel
+// bank the mains rejection frequency, the calibration table and the factory and field calibration dates.
+#define coldJunctionValueString   "COLD_JUNCTION_VALUE"
+#define rejectFrequencyString     "REJECT_FREQUENCY"
+#define calTableTypeString        "CAL_TABLE_TYPE"
+#define calDateFactoryString      "CAL_DATE_FACTORY"
+#define calDateFieldString        "CAL_DATE_FIELD"
+// The cold-junction channels are the thermocouple channel numbers offset by this value.
+#define COLD_JUNCTION_CHANNEL_OFFSET 0x80
 
 // Waveform digitizer parameters - global
 #define waveDigDwellString        "WAVEDIG_DWELL"
@@ -674,6 +683,11 @@ protected:
   int temperatureFilter_;
   int temperatureSensor_;
   int temperatureWiring_;
+  int coldJunctionValue_;
+  int rejectFrequency_;
+  int calTableType_;
+  int calDateFactory_;
+  int calDateField_;
 
   // Waveform digitizer parameters - global
   int waveDigDwell_;
@@ -758,9 +772,13 @@ private:
   bool connectAllowed_;
   int savedTCType_[MAX_SIGNALS];
   int savedOpenDetect_[MAX_SIGNALS];
+  int savedRejectFreq_[MAX_SIGNALS];
+  int savedCalTable_[MAX_SIGNALS];
   int tempReadStatus_[MAX_SIGNALS];
+  int coldJunctionStatus_;
   int initializeDevice();
   int restoreTemperatureConfig();
+  int readTemperatureBankInfo();
   asynStatus getEnums(int function, const enumStruct_t *&pEnum, int &numEnums);
   void publishEnums();
   void setInputStatus(asynStatus status);
@@ -841,10 +859,13 @@ private:
   int computeWaveDigTimes();
   int defineWaveform(int channel);
   int setOpenThermocoupleDetect(int addr, int value);
+  int setBankConfig(int addr, int function, int value);
   int reportError(int err, const char *functionName, const char *message);
   void reportTemperatureStatus(int channel, int status);
+  void reportColdJunctionStatus(int status);
   #ifdef linux
   int readTemperatureRuns(int *pInputStatus);
+  int readColdJunctions(int *pInputStatus);
   int mapRange(int Gain, Range *range);
   int mapTriggerType(int cbwTriggerType, TriggerType *triggerType);
   #endif
@@ -907,7 +928,10 @@ MultiFunction::MultiFunction(const char *portName, const char *uniqueID, int max
   for (i=0; i<MAX_SIGNALS; i++) {
     savedTCType_[i] = -1;
     savedOpenDetect_[i] = -1;
+    savedRejectFreq_[i] = -1;
+    savedCalTable_[i] = -1;
   }
+  coldJunctionStatus_ = 0;
 
   // Model parameters
   createParam(modelNameString,                 asynParamOctet,  &modelName_);
@@ -951,6 +975,11 @@ MultiFunction::MultiFunction(const char *portName, const char *uniqueID, int max
   createParam(temperatureFilterString,         asynParamInt32, &temperatureFilter_);
   createParam(temperatureSensorString,         asynParamInt32, &temperatureSensor_);
   createParam(temperatureWiringString,         asynParamInt32, &temperatureWiring_);
+  createParam(coldJunctionValueString,       asynParamFloat64, &coldJunctionValue_);
+  createParam(rejectFrequencyString,           asynParamInt32, &rejectFrequency_);
+  createParam(calTableTypeString,              asynParamInt32, &calTableType_);
+  createParam(calDateFactoryString,            asynParamOctet, &calDateFactory_);
+  createParam(calDateFieldString,              asynParamOctet, &calDateField_);
 
   // Waveform digitizer parameters - global
   createParam(waveDigDwellString,            asynParamFloat64, &waveDigDwell_);
@@ -1036,6 +1065,13 @@ MultiFunction::MultiFunction(const char *portName, const char *uniqueID, int max
     setIntegerParam(i, temperatureFilter_, 0);
     setIntegerParam(i, thermocoupleOpenDetect_, 0);
     setDoubleParam(i, temperatureInValue_, epicsNAN);
+    setDoubleParam(i, coldJunctionValue_, epicsNAN);
+    // The rejection frequency and the calibration table start at the first state of their records, 60 Hz
+    // and the factory table, until a connection publishes what the device reports.
+    setIntegerParam(i, rejectFrequency_, 1);
+    setIntegerParam(i, calTableType_, 1);
+    setStringParam(i, calDateFactory_, "");
+    setStringParam(i, calDateField_, "");
     setDoubleParam(i, voltageInValue_, epicsNAN);
     setIntegerParam(i, analogInValue_, 0);
     setIntegerParam(i, counterCounts_, 0);
@@ -1428,7 +1464,7 @@ int MultiFunction::initializeDevice()
 void MultiFunction::setInputStatus(asynStatus status)
 {
   const int parameters[] = {temperatureInValue_, voltageInValue_, analogInValue_,
-                            digitalInput_, counterCounts_};
+                            digitalInput_, counterCounts_, coldJunctionValue_};
   for (int addr=0; addr<MAX_SIGNALS; addr++) {
     for (size_t p=0; p<sizeof(parameters)/sizeof(parameters[0]); p++)
       setParamStatus(addr, parameters[p], status);
@@ -1468,8 +1504,52 @@ int MultiFunction::restoreTemperatureConfig()
       status = setOpenThermocoupleDetect(addr, savedOpenDetect_[addr]);
       if (status) return status;
     }
+    if (savedRejectFreq_[addr] >= 0) {
+      status = setBankConfig(addr, rejectFrequency_, savedRejectFreq_[addr]);
+      if (status) return status;
+      setIntegerParam(addr, rejectFrequency_, savedRejectFreq_[addr]);
+    }
+    if (savedCalTable_[addr] >= 0) {
+      status = setBankConfig(addr, calTableType_, savedCalTable_[addr]);
+      if (status) return status;
+      setIntegerParam(addr, calTableType_, savedCalTable_[addr]);
+    }
   }
   return 0;
+}
+
+// Publishes what the network TC32 reports after a connection, once the settings written before the
+// connection have been restored: the rejection frequency and the calibration table of each channel
+// bank, and the factory and field calibration dates as ULDAQ returns them. ULDAQ picks the field date of
+// the base bank at the connection from the rejection frequency the device reports then and keeps it until
+// the next connection, so the published field date can lag a setting that was restored afterwards.
+int MultiFunction::readTemperatureBankInfo()
+{
+  int status = 0;
+  #ifdef linux
+  if (boardType_ != ETH_TC32) return 0;
+  static const char *functionName = "readTemperatureBankInfo";
+  int banks = (numTemperatureIn_ > 32) ? 2 : 1;
+  for (int bank=0; bank<banks && !status; bank++) {
+    int addr = bank ? 32 : 0;
+    long long value = 0;
+    status = ulAIGetConfig(daqDeviceHandle_, AI_CFG_REJECT_FREQ_TYPE, bank, &value);
+    if (status) break;
+    setIntegerParam(addr, rejectFrequency_, (int)value);
+    status = ulAIGetConfig(daqDeviceHandle_, AI_CFG_CAL_TABLE_TYPE, bank, &value);
+    if (status) break;
+    setIntegerParam(addr, calTableType_, (int)value);
+    for (unsigned int index=0; index<2 && !status; index++) {
+      char text[MAX_STRING_SIZE] = "";
+      unsigned int length = sizeof(text);
+      status = ulAIGetConfigStr(daqDeviceHandle_, bank ? AI_CFG_EXP_CAL_DATE_STR : AI_CFG_CAL_DATE_STR,
+                                index, text, &length);
+      if (!status) setStringParam(addr, index ? calDateField_ : calDateFactory_, text);
+    }
+  }
+  if (status) reportError(status, functionName, "Reading the temperature bank information");
+  #endif
+  return status;
 }
 
 asynStatus MultiFunction::connect(asynUser *pasynUser)
@@ -1494,6 +1574,11 @@ asynStatus MultiFunction::connect(asynUser *pasynUser)
       #endif
     }
     if (!status) status = restoreTemperatureConfig();
+    if (!status) {
+      // A failure of the extra information other than a lost connection does not fail the connection.
+      int infoStatus = readTemperatureBankInfo();
+      if (isConnectionError(infoStatus)) status = infoStatus;
+    }
     if (status) {
       #ifdef _WIN32
         if (boardNum_ >= 0) cbReleaseDaqDevice(boardNum_);
@@ -1525,6 +1610,7 @@ asynStatus MultiFunction::connect(asynUser *pasynUser)
     enumCallbacksPending_ = true;
     for (int i=0; i<MAX_IO_PORTS; i++) forceCallback_[i] = 1;
     for (int i=0; i<MAX_SIGNALS; i++) tempReadStatus_[i] = 0;
+    coldJunctionStatus_ = 0;
     ULMutex.unlock();
     setStringParam(lastErrorMessage_, "");
     notifyConnection(true);
@@ -1626,7 +1712,54 @@ void MultiFunction::reportTemperatureStatus(int channel, int status)
   }
 }
 
+// Reports the status of the cold-junction read only when it differs from the previous poll, so a
+// persistent failure produces one line when it starts and one when it ends.
+void MultiFunction::reportColdJunctionStatus(int status)
+{
+  static const char *functionName = "pollerThread";
+  if (status == coldJunctionStatus_) return;
+  coldJunctionStatus_ = status;
+  if (status) {
+    reportError(status, functionName, "Calling TIn cold junction");
+  } else {
+    ULMutex.lock();
+    asynPrint(pasynUserSelf, ASYN_TRACE_ERROR,
+      "%s::%s Cold junction read returned to normal\n", driverName, functionName);
+    ULMutex.unlock();
+  }
+}
+
 #ifdef linux
+// Reads the cold-junction temperature of every thermocouple channel of a network TC32 with one
+// ulTInArray() call over the cold-junction channels, which are the channel numbers offset by 0x80, in
+// Celsius. A failure that is not a lost connection marks only the cold-junction values and leaves the
+// temperature values alone. A lost connection is returned so that the poller leaves through its
+// disconnect path; *pInputStatus takes a failure so that LAST_ERROR_MESSAGE clears when the read recovers.
+// A device that reports no temperature channels has nothing to read and no request is sent.
+int MultiFunction::readColdJunctions(int *pInputStatus)
+{
+  double values[MAX_SIGNALS];
+  if (numTemperatureIn_ <= 0) return 0;
+  for (int c=0; c<numTemperatureIn_; c++) values[c] = epicsNAN;
+  int callStatus = ulTInArray(daqDeviceHandle_, COLD_JUNCTION_CHANNEL_OFFSET,
+                              COLD_JUNCTION_CHANNEL_OFFSET + numTemperatureIn_ - 1, TS_CELSIUS,
+                              TINARRAY_FF_DEFAULT, values);
+  if (isConnectionError(callStatus)) return callStatus;
+  reportColdJunctionStatus(callStatus);
+  for (int c=0; c<numTemperatureIn_; c++) {
+    if (callStatus) {
+      setParamStatus(c, coldJunctionValue_, asynError);
+      continue;
+    }
+    setParamStatus(c, coldJunctionValue_, asynSuccess);
+    // We want to force a callback, even if the value is the same, as the temperature values do.
+    setDoubleParam(c, coldJunctionValue_, values[c] + 1);
+    setDoubleParam(c, coldJunctionValue_, values[c]);
+  }
+  if (callStatus) *pInputStatus = callStatus;
+  return 0;
+}
+
 // Reads the thermocouple channels of a network TC32 with one ulTInArray() call for each run of
 // consecutive thermocouple channels that share a temperature scale, so a poll costs one request when
 // every channel has the same scale.  ULDAQ fills the data of a call that reports an open thermocouple
@@ -2324,8 +2457,10 @@ asynStatus MultiFunction::writeInt32(asynUser *pasynUser, epicsInt32 value)
   if (!connected_) return asynDisconnected;
 
   this->getAddress(pasynUser, &addr);
-  // Thermocouple readback retains the last confirmed setting on write failure.
-  if (function != thermocoupleType_) setIntegerParam(addr, function, value);
+  // Thermocouple readback retains the last confirmed setting on write failure, and so do the rejection
+  // frequency and the calibration table of a network TC32.
+  if (function != thermocoupleType_ && function != rejectFrequency_ && function != calTableType_)
+    setIntegerParam(addr, function, value);
 
   bool isThermocouple = true;
   if (analogInTypeConfigurable_) {
@@ -2398,6 +2533,10 @@ asynStatus MultiFunction::writeInt32(asynUser *pasynUser, epicsInt32 value)
 
   else if ((function == thermocoupleOpenDetect_) && isThermocouple) {
     status = setOpenThermocoupleDetect(addr, value);
+  }
+
+  else if (function == rejectFrequency_ || function == calTableType_) {
+    status = setBankConfig(addr, function, value);
   }
 
   else if (function == temperatureSensor_) {
@@ -2572,9 +2711,16 @@ asynStatus MultiFunction::writeInt32(asynUser *pasynUser, epicsInt32 value)
   }
   ULMutex.unlock();
 
-  if (!status && function == thermocoupleType_) setIntegerParam(addr, function, value);
+  if (!status && (function == thermocoupleType_ || function == rejectFrequency_ || function == calTableType_))
+    setIntegerParam(addr, function, value);
   if (!status && addr >= 0 && addr < MAX_SIGNALS) {
     if (function == thermocoupleType_) savedTCType_[addr] = value;
+    if (function == rejectFrequency_ || function == calTableType_) {
+      // These settings belong to a channel bank, as the open detection does.
+      int configAddr = (addr < 32) ? 0 : 32;
+      if (function == rejectFrequency_) savedRejectFreq_[configAddr] = value;
+      else savedCalTable_[configAddr] = value;
+    }
     if (function == thermocoupleOpenDetect_) {
       // These devices apply open detection to a complete channel bank.
       int configAddr = addr;
@@ -2627,6 +2773,38 @@ int MultiFunction::setOpenThermocoupleDetect(int addr, int value)
     ULMutex.unlock();
     reportError(status, functionName, "Setting thermocouple open detect mode");
   }
+  return status;
+}
+
+// Writes the mains rejection frequency or the calibration table of the channel bank that holds the
+// channel addr, for a network TC32 only. The value must be one of the two ULDAQ enumerators, which start
+// at 1; it is checked here because ulAISetConfig() casts the value without a range check and the device
+// would treat every other value as 60 Hz or the factory table.
+int MultiFunction::setBankConfig(int addr, int function, int value)
+{
+  static const char *functionName = "setBankConfig";
+  int status = 0;
+  #ifdef linux
+  if (boardType_ != ETH_TC32) {
+    reportError(-1, functionName, "This setting needs a network TC32");
+    return -1;
+  }
+  bool rejection = (function == rejectFrequency_);
+  if (rejection ? (value != AI_RFT_60HZ && value != AI_RFT_50HZ) : (value != AI_CTT_FACTORY && value != AI_CTT_FIELD)) {
+    reportError(-1, functionName, rejection ? "The rejection frequency must be 1 (60 Hz) or 2 (50 Hz)"
+                                            : "The calibration table must be 1 (factory) or 2 (field)");
+    return -1;
+  }
+  // The base bank is 0 and the expansion bank is 1, the same split as the open thermocouple detection.
+  int bank = (addr >= 32) ? 1 : 0;
+  ULMutex.lock();
+  status = ulAISetConfig(daqDeviceHandle_, rejection ? AI_CFG_REJECT_FREQ_TYPE : AI_CFG_CAL_TABLE_TYPE, bank, value);
+  ULMutex.unlock();
+  reportError(status, functionName, rejection ? "Setting the rejection frequency" : "Setting the calibration table");
+  #else
+  status = -1;
+  reportError(-1, functionName, "This setting needs ULDAQ");
+  #endif
   return status;
 }
 
@@ -3253,6 +3431,11 @@ void MultiFunction::pollerThread()
       if (boardType_ == ETH_TC32) {
         status = readTemperatureRuns(&inputStatus);
         if (isConnectionError(status)) goto error;
+        int coldJunctionResult = readColdJunctions(&inputStatus);
+        if (isConnectionError(coldJunctionResult)) {
+          status = coldJunctionResult;
+          goto error;
+        }
       } else
       #endif
       for (i=0; i<numTemperatureIn_; i++) {
