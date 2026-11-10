@@ -21,7 +21,10 @@ asynSetTraceMask("DAQ", -1, 1)
 
 Setting auto-connect to zero prevents automatic reconnection. Disabling the port
 also stops polling after any current poll completes. Enabling auto-connect and
-the port resumes retries. The trace mask above keeps error messages enabled.
+the port resumes retries and the retry interval returns to five seconds. Use
+the address -1 of the port: the same commands with a device address such as 0
+act on that address and do not restart the interval. The trace mask above keeps
+error messages enabled.
 
 On a transport failure, the driver closes the vendor connection, notifies asyn
 of disconnection, and sends error callbacks. Input records using I/O Intr retain
@@ -293,6 +296,14 @@ and with three runs of scales, counts the temperature requests of each poll,
 and checks the scale of each channel, the timestamp of the records, an open, a
 common-mode and a disabled channel in one request, the default of the `TSE`
 macro, a request that fails without a connection error, and a transport error.
-Real hardware power cycling, physical ADC calibration, analog output
-voltage, scan acquisition, EXP-32, USB, Windows and other models require
+A power-off and a network disconnect of one TC-32 were observed on real
+hardware with a running IOC, and so was a device that stays linked and stops
+answering: the connection retries, the records and `LAST_ERROR_MESSAGE` followed
+the rules above and the records recovered at the next retry, a change of the
+open detection produced one error and one return-to-normal line, and a
+disabled channel reads -11111 without an error. The longest run was 38 minutes
+and no outage was long enough for the interval to reach 60 seconds. Other
+real-hardware behavior, such as the effect of a silent device on a second port,
+a persistent common-mode input, physical ADC calibration, analog output
+voltage, scan acquisition, EXP-32, USB, Windows and other models, requires
 separate verification.
