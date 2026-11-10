@@ -301,8 +301,9 @@ hardware with a running IOC, and so was a device that stays linked and stops
 answering: the connection retries, the records and `LAST_ERROR_MESSAGE` followed
 the rules above and the records recovered at the next retry, a change of the
 open detection produced one error and one return-to-normal line, and a
-disabled channel reads -11111 without an error. The longest run was 38 minutes
-and no outage was long enough for the interval to reach 60 seconds. Other
+disabled channel reads -11111 without an error. A run of 15.6 hours with all
+channels fitted showed no driver message and a flat poll time, and no outage
+was long enough for the interval to reach 60 seconds. Other
 real-hardware behavior, such as the effect of a silent device on a second port,
 a persistent common-mode input, physical ADC calibration, analog output
 voltage, scan acquisition, EXP-32, USB, Windows and other models, requires
