@@ -12,7 +12,7 @@ Remote milestone observed at: 2026-11-09T17:31:46Z; state: open; two open issues
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/2`.
 Baseline commit: 9c39e491e463fac77f15cfcec16aa8b4a97cbf10
 
-Next session entry point: Review and accept the plan of M4 (issue #14) in its detail, the nearest Ready row; it can use the per-channel values and the request shape that the single-request read added to `tests/TC32.pm`. Issues #11 to #15 are assigned to GitHub milestone 2.
+Next session entry point: Finish M4 (issue #14), in progress under the accepted plan of 2026-11-10: the six plan items are implemented in the working tree and T1 passed; T3 passed; T2 still needs Perl 5.26.3 and the Rocky 8 image (the image 1.2.2 is not on the host), and the changes are not committed or pushed, which takes the owner's git authority, so M4 is not Complete; M5 is the nearest Ready row. The fixture can use the per-channel values and the request shape that the single-request read added to `tests/TC32.pm`. Issues #11 to #15 are assigned to GitHub milestone 2.
 
 ## Scope
 
@@ -31,10 +31,10 @@ The common integration environment is Linux with the real measComp driver, EPICS
 | M1 | Silent device stalls other ports | Carry-forward | Complete | No | | A healthy port keeps polling beside a silent network device; issue #11; [detail](#m1---silent-device-stalls-other-ports) |
 | M2 | Persistent read error logging | Carry-forward | Complete | No | | A persistent thermocouple read error is reported once per change; issue #12; [detail](#m2---persistent-read-error-logging) |
 | M3 | Single-request thermocouple read and acquisition time | Carry-forward | Complete | No | | One temperature request per scale group per poll with one acquisition timestamp; issue #13; [detail](#m3---single-request-thermocouple-read-and-acquisition-time) |
-| M4 | Thermocouple device diagnostics | Carry-forward | Not started | Yes | | Cold-junction temperatures, mains rejection and calibration information are exposed; issue #14; [detail](#m4---thermocouple-device-diagnostics) |
+| M4 | Thermocouple device diagnostics | Carry-forward | In progress | No | | Cold-junction temperatures, mains rejection and calibration information are exposed; issue #14; [detail](#m4---thermocouple-device-diagnostics) |
 | M5 | Temperature filter on Linux | Carry-forward | Not started | Yes | | The temperature filter takes effect on Linux; issue #15; [detail](#m5---temperature-filter-on-linux) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: three Complete and two Not started. `Ready` records dependency readiness only. No external prerequisite is established for these rows.
+The row order follows issue numbers and imposes no execution dependency. Current status: three Complete, one In progress and one Not started. `Ready` records dependency readiness only. No external prerequisite is established for these rows.
 
 ### Milestone Details
 
@@ -318,7 +318,7 @@ Last Compared: 2026-11-09T17:31:46Z; remote updated at 2026-11-09T17:30:19Z
 Origin: 9c39e49 / M4
 Identity History: none
 GitHub Issue: [#14](https://github.com/jeonghanlee/measComp/issues/14)
-Status: Not started
+Status: In progress
 
 ##### Summary
 
@@ -338,7 +338,7 @@ Out of scope: The E-TC, whose counterparts are registered under row M10, other b
 - A value other than the two valid ones, written to the rejection frequency or the calibration table, is rejected and changes neither the device nor the readback.
 - A failed cold-junction read marks only the cold-junction records and does not change the temperature records.
 - The TC32 fixture implements the cold-junction command and configurable calibration dates, a shipped case checks each item, it fails on the driver before this change, and the 29 existing cases pass unchanged.
-- No template used by another board changes.
+- No template used by another board changes, and `TC32.substitutions`, which both the USB and the network TC-32 load, is unchanged.
 - The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
 
 ##### Dependencies And Decisions
@@ -346,26 +346,28 @@ Out of scope: The E-TC, whose counterparts are registered under row M10, other b
 - None. No work or external gate must complete first.
 - Decision Date: 2026-11-08. The owner assigned this work to the Network thermocouple acquisition milestone, GitHub milestone 2.
 - Decision Date: 2026-11-09. The owner chose to change the TC32 only and to move the E-TC counterparts to row M10, because no E-TC protocol fixture exists; the scope of the linked issue is narrowed to the TC32 when it is closed.
-- Decision Date: 2026-11-09. The owner chose new templates loaded by `TC32.substitutions` only, because the existing temperature template is shared by the E-TC and the USB boards, whose databases would otherwise gain records for values they do not have.
+- Decision Date: 2026-11-09. The owner chose new templates loaded by `TC32.substitutions` only, because the existing temperature template is shared by the E-TC and the USB boards, whose databases would otherwise gain records for values they do not have. The choice of the file that loads them is replaced by the decision of 2026-11-10 below.
 - Decision Date: 2026-11-09. The owner chose to read the cold-junction temperatures on every poll as the issue asks; the cost is one more request per poll, to be reviewed against the poll time measured on a real TC32.
 - Decision Date: 2026-11-09. The owner chose the string items for the calibration dates because they are the documented public items of ULDAQ.
 - Decision Date: 2026-11-09. The owner chose to publish the calibration dates as ULDAQ returns them: ULDAQ picks the field date of the base bank at the connection from the rejection frequency the device reports then, and keeps it until the next connection, so the published field date can lag a setting that the driver restores after the connection; the limit is documented and the case checks it. Forcing a second connection to realign the date was rejected as heavier than the date is worth.
+- Decision Date: 2026-11-10. The owner chose a new substitutions file for the new records, loaded only for the network TC32 through a commented line in `iocBoot/iocTC32/st.cmd` that the operator enables, and `TC32.substitutions` stays unchanged, because `iocBoot/iocTC32/st.cmd` loads `TC32.substitutions` for the USB and the network TC-32 alike (`boardFamily_` is `USB_TC32` for both), so new records in it would also appear on a USB TC-32, where the driver rejects their writes.
+- Decision Date: 2026-11-10. The owner chose to state, as a limit of the real-device check, that the real unit returns the same string for the factory and the field date (Closure Evidence, 2026-11-10), and to keep the fixture requirement that the two dates differ.
 
 ##### Implementation Plan
 
-Plan Status: draft
-Plan Acceptance: none
-Implementation Authorization: none
+Plan Status: accepted
+Plan Acceptance: 2026-11-10; accepted by the owner after the placement of the new records and the date limit were decided and the plan text was revised accordingly, and after the cold-junction request was read on the real TC32; no separate review pass was held before acceptance.
+Implementation Authorization: 2026-11-10; implement and verify the accepted plan items 1 to 6.
 Superseded Plan Artifacts: none
 
 1. `tests/TC32.pm`: implement the cold-junction command `0x13`, whose payload is the base and expansion channel masks and whose answer is one float for each requested channel, from a per-channel cold-junction table with a default and a method to set a channel; reject a request for the expansion; make the calibration dates of the commands `0x3A` (the factory dates of the base and the expansion) and `0x3C` (four field dates: base at 60 Hz, base at 50 Hz, expansion at 60 Hz, expansion at 50 Hz) configurable, all different; describe both in the POD. The measurement byte of `0x18` and `0x19` already holds the bits of the open detection, rejection and calibration table. Verified by T1 and T2.
 2. `tests/reconnect_ioc.cpp` and `tests/build_reconnect.pl`: load the new templates for the two test channels and bank 0 from the directory of the temperature template, print the string value of a record by name, add a command that writes the rejection frequency or the calibration table through the asyn parameter with any integer so that a case can write an invalid value, and add the two new templates to the input list whose hashes the builder records. Verified by T1.
 3. `measCompApp/src/drvMultiFunction.cpp`: add the parameters for the cold-junction value, the rejection frequency, the calibration table and the calibration date strings. For `ETH_TC32` read the cold-junction channels once per poll after the temperature read; a cold-junction failure sets only its own parameters to error and is reported once for each change, and a connection error leaves through the existing disconnect path. Write the rejection frequency and the calibration table with the bank index of `setOpenThermocoupleDetect`, keep the written values and write them again in `restoreTemperatureConfig()`. The values are the ULDAQ enumerators, which start at 1: rejection 1 for 60 Hz and 2 for 50 Hz, calibration table 1 for factory and 2 for field. Reject any other value with an error before the device is touched, because `ulAISetConfig()` casts the value without a check and the TC32 treats every value but 50 Hz and the field table as 60 Hz and the factory table. As `thermocoupleType_` is, leave both parameters out of the early parameter update of `writeInt32()`, so that a readback changes only after a successful write. The settings act only for board type `ETH_TC32`, because `boardFamily_` is `USB_TC32` for the USB TC-32 too, and a write on another board is rejected. and read the settings and both dates after each connection and publish the dates as ULDAQ returns them. Verified by T1 and T2.
-4. `measCompApp/Db/measCompTemperatureCJC.template`, `measCompApp/Db/measCompTemperatureBank.template` and `measCompApp/Db/TC32.substitutions`: the cold-junction record for each channel; the rejection frequency, calibration table and the two date records for each bank; both loaded by `TC32.substitutions` only. Verified by T1, T2 and a check that the other substitutions are unchanged.
+4. `measCompApp/Db/measCompTemperatureCJC.template`, `measCompApp/Db/measCompTemperatureBank.template` and a new `measCompApp/Db/TC32Network.substitutions`: the cold-junction record for each channel; the rejection frequency, calibration table and the two date records for each bank. The new file is loaded only for the network TC32, by a commented line in `iocBoot/iocTC32/st.cmd` that the operator enables, and `TC32.substitutions` is not changed. Verified by T1, T2 and a check that `TC32.substitutions` and every other substitutions file are unchanged.
 5. `tests/test_reconnect.pl`: add the case `temperature-diagnostics`. It counts the cold-junction requests of polls and checks their mask, compares the cold-junction records with distinct fixture values for channels 0 and 31 and follows a change, sets the rejection frequency and then the calibration table and checks the bits of the measurement byte beside an open detection that was set before, forces a connection error with the device configuration reset and requires both bits and the readbacks to come back, compares the factory and field date strings with expected strings built from the fixture's fields in the same format, which is the local time formatted with `%c`, and checks the field date in three steps: it is the 60 Hz date at the first connection, it stays when the rejection frequency is set to 50 Hz without a reconnect, it stays the 60 Hz date after a reconnect that lost the device configuration even though the 50 Hz setting is restored, and it becomes the 50 Hz date after a reconnect that kept the device configuration. It requires the IOC to exit normally. It writes 0 and 3 to each setting through the new command and requires both writes to be rejected with the device byte and the readback unchanged. It also makes the cold-junction read fail with the fixture's `bad-size` fault on the command `0x13` and checks that only the cold-junction records go to error and the temperature records keep their values and severity. Verified by T1.
 6. `docs/reconnection.md` and `tests/README.md`: describe the four items, the bank semantics, the Celsius unit of the cold-junction records, the date format (local time formatted with `%c`), the limit that the field date follows the rejection frequency at the connection, the new templates and the case with its command and duration, its original-behavior control and one negative control for each rule: no cold-junction read, no restore of the settings after a reconnect, swapped factory and field dates, a cold-junction failure that also marks the temperature records, and passing an invalid value to the device. Verified by T3.
 
-The expansion bank goes through the same code by channel address and is not exercised, because the fixture models a TC32 without an EXP-32; the result records that limit. Whether the device keeps the rejection frequency and calibration table across a power cycle is a property of the hardware and is not tested here.
+The expansion bank goes through the same code by channel address and is not exercised, because the fixture models a TC32 without an EXP-32; the result records that limit. Whether the device keeps the rejection frequency and calibration table across a power cycle is a property of the hardware and is not tested here. The real TC32 that was read returns the same string for the factory date and the field date, so a check on that unit can show only that the date is read and published; the fixture, whose dates differ, is what tells the two apart.
 
 ##### Test Plan
 
@@ -379,9 +381,11 @@ The expansion bank goes through the same code by channel address and is not exer
 
 | Label | Observed At | Environment | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| T1 | Not run | Common integration environment | Pending | none |
-| T2 | Not run | Common integration environment | Pending | none |
-| T3 | Not run | Repository documents | Pending | none |
+| T1 | 2026-11-10T21:01:10Z to 21:04:31Z | Debian 13, Perl 5.40.1; the real IOC built by `tests/build_reconnect.pl` against EPICS Base 7.0.10, asyn 4.46.0 and the ULDAQ 1.2.2 of the 1.5.0 distribution, which records uldaq-env a5094ec for it (the library was not rebuilt, and its TCP receive patch was not checked here); one TC32 fixture with the cold-junction command and six different calibration dates | Pass: `temperature-diagnostics` in three runs on the changed driver, 23 of 23 assertions each, IOC exit 0; the driver of HEAD (SHA-256 `7fdfcc9ceacfede45c28bad02897c511132f5f4210eec83d20a9a0cfdbd91e77`) with the final tests fails `temperature diagnostics one cold-junction request per poll` (58 polls, 0 requests); the seven negative controls of `tests/README.md` for this case each fail the assertion named for them, written before the run | The run directories of this session; the source identity below |
+| T2 | 2026-11-10T20:48:15Z to 21:00:54Z | Debian 13, Perl 5.40.1 | Pending | Done: 30 cases (the 29 earlier and the new one) pass 1,138 assertions with every IOC exit 0; `endpoint-same-ip` 150 of 150 runs; `perl -wc` and `podchecker` of the four Perl files, the module list and the usage exits (0, 0, 2, 2) pass. Not run: Perl 5.26.3 and the Rocky 8 image, because the image 1.2.2 is not on the host |
+| T3 | 2026-11-10T22:49:01Z | Repository documents in the working tree | Pass: the changed passages of `docs/reconnection.md` and `tests/README.md` were read from the seat of an operator in two second-person passes by delegated readers. The 1st read three excerpts and found 8 must-fix and minor items; 11 of its findings were applied after the owner's ruling and the rest were ruled out as coming from the missing context of the excerpts or as wording additions. The 2nd read both complete documents first line to last, checked every name, command, number and path against the files and the real runs of this session, and found no must-fix and no minor finding; it left three info observations, of which the owner had one corrected: the duration of the case, about 25 s, which the runs measured as 14 and 15 s, now reads about 15 s | The 2nd pass read `docs/reconnection.md` SHA-256 `3bee05fe13b59befa85519a68aee3f55f99704b83e33c4abffa758bf3109d7af` and `tests/README.md` `955e67bdf0e1e76a122a4da8ebf9c24a3396e03893d2eb26bdca8818c2cba22d`; after the one-number correction `tests/README.md` is `459d417bd5a3525bbe08e5bdd4abaa94169060ad23adedf29eb066bf9ff2815f` and `docs/reconnection.md` is unchanged |
+
+Source identity of the run: `tests/test_reconnect.pl` SHA-256 `58cd851b913fa624dae0b7713e315d08747340957a5b7c080e5506fba091af84`; `tests/TC32.pm` `3a84e5a52e73a14e7cb78fe4904b194f9486d08832e15bbc68b6e93dff598e24`; `tests/E1608.pm` `621e8daa6c1cad55010dcaa381c3f4722913054c83585d60ab3c1d91f791f930`; `tests/build_reconnect.pl` `bb6f160dad324420c82d664af2e56e389689856eeda8a85f60009a66590190b7`; `tests/reconnect_ioc.cpp` `4c059fd9eb2445abe913ebacc9d8377ffda635ffd4b4641d97df1a98965e37fd`; `tests/exit_loop.bash` `5f4a0f6085a08021f94508424297302de8913745de940d53c2d59786f96f9826`; `drvMultiFunction.cpp` `6c013fdb2cb252615731ae0ec008ecbf5a08d28aa15e7ae92656924e9ac5896e`; `measCompTemperatureIn.template` `e25747a101a3bffbe9fce499ad6fac38593b91093a49d51a839d0093bc62f090`; `measCompTemperatureCJC.template` `ad036cdbc4d28aa4b6c645135dd20ed421f0f9b08a814d06ae182c58c8f29cc9`; `measCompTemperatureBank.template` `524343c4d2b05e6a9beaef4fdabf2f9bf527bcd5cf1fa96161c4cb51b76d6b06`; `TC32Network.substitutions` `af947bd984c8c16934637724676504e146e747ae328612a1c45245475c377dda`. The input hashes that the builder recorded for the regression build equal the hashes of the nine files it lists. The final driver adds one statement, which returns from the cold-junction read when the device reports no temperature channels; the 30 cases and the exit loop (150 of 150) were run again on it and passed, while the negative controls, the original-behavior control and the read-only real-device read ran on the driver `ea97fb69` that lacks this statement, and no case reaches the statement.
 
 ##### Closure Evidence
 
@@ -389,7 +393,11 @@ The expansion bank goes through the same code by channel address and is not exer
 - Read 2026-11-09 in the ULDAQ 1.2.2 source: the rejection frequency, the calibration table and the open thermocouple detection are the bits `filter`, `cal` and `otd` of one byte for each bank, read and written whole by `CMD_MEASURE_CONFIG_R` and `CMD_MEASURE_CONFIG_W` (`src/net/ai/AiETc32.cpp`); the cold-junction channels are read with `CMD_CJC_MULTI` (`0x13`) at the channel numbers offset by `0x80`, 32 of them without an EXP-32; the public date items are `AI_CFG_CAL_DATE_STR` and `AI_CFG_EXP_CAL_DATE_STR`. `tests/TC32.pm` has no `0x13` and returns constant dates for `0x3A` and `0x3C`.
 - Read 2026-11-09 in the ULDAQ 1.2.2 source: `AiETc32::initialize()` reads the dates once per connection and picks the base field date from the base rejection frequency reported then (`mTc32FieldCalDates[1]` at 50 Hz, `[0]` at 60 Hz), and `getCfg_CalDateStr()` returns that stored value as `strftime("%c")` of the local time; the expansion field date is chosen from the expansion rejection frequency at each call.
 - Read 2026-11-09 for the input side: `ulAISetConfig()` casts the written value to `AiRejectFreqType` or `AiCalTableType` without a range check (`src/ulc.cpp`), the enumerators are 1 and 2 (`AI_RFT_60HZ`, `AI_RFT_50HZ`, `AI_CTT_FACTORY`, `AI_CTT_FIELD` in `src/uldaq.h`), and `AiETc32::setCfg_RejectFreqType()` and `setCfg_CalTableType()` store every other value as 60 Hz or the factory table. In `drvMultiFunction.cpp` the thermocouple type template states carry the ULDAQ values (`ZRVL` 1 for Type J), `writeInt32()` updates every parameter before the device write except `thermocoupleType_`, and `boardFamily_` is `USB_TC32` for both `USB_TC32` and `ETH_TC32`.
-- Observed 2026-11-10 on a real TC-32 by the session that has the device, with a read-only probe of the 1.5.0 distribution's vendor ULDAQ that used only `ulAIGetConfig()`, `ulAIGetConfigStr()` and `ulTInArray()` and wrote nothing to the device: `ulTInArray()` over the channels `0x80` to `0x9F` in Celsius returned 32 values in one call, 10 of 10 calls succeeded with a mean of 0.97 ms, and the values lay between 29.3 and 30.5 C, rising with the channel number, while the thermocouple channels read 27 to 36 C at the same time; one cold-junction channel alone (`0x80`) took 0.67 ms, and the call over channels 0 to 31 took 1.01 ms, so one more request for each poll costs about 1 ms of device time here, and the cost on the driver side was not measured. The settings read back were rejection frequency 1 (60 Hz), calibration table 1 (factory) and open detection 2 (enabled). `AI_CFG_CAL_DATE_STR` returned the same string for the factory date (index 0) and the field date (index 1) of this unit, so a real unit of this kind cannot show the difference that the fixture dates are meant to show. Not tested: writing the rejection frequency or the calibration table, the expansion bank, and what the device keeps over a power cycle.
+- Observed 2026-11-10 on a real TC-32 by the session that has the device, with a read-only probe of the 1.5.0 distribution's vendor ULDAQ that used only `ulAIGetConfig()`, `ulAIGetConfigStr()` and `ulTInArray()` and wrote nothing to the device: `ulTInArray()` over the channels `0x80` to `0x9F` in Celsius returned 32 values in one call, 10 of 10 calls succeeded with a mean of 0.97 ms, and the values lay between 29.4 and 30.5 C, rising with the channel number, while the thermocouple channels read 27 to 36 C at the same time; one cold-junction channel alone (`0x80`) took 0.67 ms, and the call over channels 0 to 31 took 1.01 ms, so one more request for each poll costs about 1 ms of device time here, and the cost on the driver side was not measured. The settings read back were rejection frequency 1 (60 Hz), calibration table 1 (factory) and open detection 2 (enabled). `AI_CFG_CAL_DATE_STR` returned the same string for the factory date (index 0) and the field date (index 1) of this unit, so a real unit of this kind cannot show the difference that the fixture dates are meant to show. Not tested: writing the rejection frequency or the calibration table, the expansion bank, and what the device keeps over a power cycle.
+- Read 2026-11-10 in the ULDAQ source (`src/net/ai/AiETc32.h` and `AiETc32.cpp` of the `uldaq` repository at e1b9c47, whose latest tag is v1.2.0; the 1.5.0 distribution carries 1.2.2): the measurement byte of each bank holds `otd` in bit 0 (1 disables the detection), `filter` in bit 1 (1 is 50 Hz) and `cal` in bit 2 (1 is the field table), and `initialize()` reads the dates once and picks the base field date from the rejection frequency that the device reports then.
+- Captured 2026-11-10 on a real TC32 with a send and receive logging shim on the read-only probe: the cold-junction request `0x13` carries the payload `ffffffff00000000` for the 32 channels and `0100000000000000` for one, and is answered with one little-endian float for each channel (128 bytes for 32); `0x3A` returns 12 bytes and `0x3C` 24 bytes of six-byte dates, the unit's date bytes being `15 03 0b 03 26 13`, which is 2021-03-11 03:38:19. The fixture was compared with these frames in 15 checks (lengths, byte order, refusal of an expansion mask, date shape and setters) and all passed.
+- Observed 2026-11-10T20:52Z to 20:54Z on the same real TC32 with the driver of the working tree (a scratch build, only the new records loaded, so that no existing `PINI` record wrote to the device): `<channel>ColdJunction` of channels 0, 1, 2, 15, 28 and 31 read 29.86 to 30.89 C, `Bank0RejectFreq` read 60 Hz, `Bank0CalTable` read Factory, and `Bank0CalDateFactory` and `Bank0CalDateField` both read `Thu Mar 11 03:38:19 2021`; the IOC log held no driver line. The interval between updates of one cold-junction record was 53.79 ms on average over 558 updates, against 52.9 ms for `PollTimeMS` of the site IOC, about 0.9 ms more, measured while a regression ran on the same host and with two different measures, so it is an estimate. The probe read the same settings and dates before and after (rejection 1, table 1, open detection 2, both dates equal); the settings were not written there.
+- Limits of the check: of the 23 assertions of `temperature-diagnostics`, seven are proved able to fail by a negative control (one request per poll, the factory date, the rejection frequency set from its record, the restore after a reconnect, the date read again after a reconnect, the rejection of invalid values, the failed read that marks only the cold-junction records); sixteen have no negative control yet: the cold-junction records showing the fixture values and following a change, the unchanged temperature records, the field date at the first connection, the open detection write, the calibration table set from its record, the readback, the field date not following a setting, the readbacks after a reconnect, the field date at 60 Hz and at 50 Hz after the two reconnects, the report once and the message of a persistent cold-junction failure, the recovery line, the fixture error list and the IOC exit. The helper `digital_window` of `tests/test_reconnect.pl` now skips the cold-junction request that ends a poll before its window starts, because the digital cases count the requests after that point and the first regression run failed `digital bit write stops after first error` without it; its assertions are unchanged and the three digital cases pass. The expected date text is built in the C locale, because the IOC never sets a locale. The expansion bank goes through the same code and was not exercised. The run directories are in the session's temporary directory and are not retained.
 
 ##### GitHub Projection
 
@@ -476,6 +484,7 @@ Last Compared: 2026-11-08T05:09:19Z; remote updated at 2026-11-08T05:09:19Z
 | M8 | Open-detect result on input type change | Carry-forward | Blocked | No | G1 | A connection error from the open-detect call in the input-type branch disconnects the port; [detail](#m8---open-detect-result-on-input-type-change) |
 | M9 | Persistent errors of the other poll-loop reads | Carry-forward | Open | No |  | The digital input, counter, analog input and scan status reads report a persistent error once per change as the temperature read does, or the owner records that they need not; priority and fixture are undecided; [detail](#m9---persistent-errors-of-the-other-poll-loop-reads) |
 | M10 | E-TC array read | Carry-forward | Open | No |  | The E-TC reads its channels with one request per poll and exposes its cold-junction temperatures, calibration table and calibration dates, verified with an E-TC protocol fixture; priority and fixture scope are undecided; [detail](#m10---e-tc-array-read) |
+| M11 | Mixed value at a state change of the averaging temperature record | Carry-forward | Open | No |  | The default temperature template publishes one value that mixes the old and the new state at each open-detection or scale change, and the site template does not; whether and how to change the default template is undecided; [detail](#m11---mixed-value-at-a-state-change-of-the-averaging-temperature-record) |
 | G1 | USB board for hardware verification | External gate | Open | No |  | A USB board that exercises M7 or M8 is available and its model is recorded; [detail](#g1---usb-board-for-hardware-verification) |
 
 ### Backlog Details
@@ -784,6 +793,67 @@ Superseded Plan Artifacts: none
 ##### Closure Evidence
 
 - Observed 2026-11-09 while reviewing the plan of the single-request work: `tests/` holds only `TC32.pm` and `E1608.pm`.
+
+##### GitHub Projection
+
+Title: none
+Labels: none
+GitHub Milestone: none
+Observed State: none
+Observed Labels: none
+Observed Milestone: none
+Last Compared: never
+
+#### M11 - Mixed Value At A State Change Of The Averaging Temperature Record
+
+Origin: 9c39e49 / M11
+Identity History: none
+GitHub Issue: none
+Status: Open
+
+##### Summary
+
+The shipped temperature template `measCompTemperatureIn.template` reads with `asynFloat64Average` and `SCAN` of one second, so one published value is the mean of the samples of one scan. At the moment the open detection or the scale of a channel changes, that mean mixes the samples of the old and the new state and is published as a valid reading. The site database, which uses `asynFloat64` and `MDEL` -1, published no such value in the same transitions. The cause is a hypothesis from arithmetic, not a code finding.
+
+##### Scope
+
+Decide whether the default temperature template changes so that no mixed value is published at a state change, and if so how, or whether the behavior is documented and left; then plan the change. The record to compare is the site template used by the `tcmd` repository.
+
+Out of scope: the site repository, the driver read path and the E-TC and USB boards that share the template.
+
+##### Completion Criteria
+
+- The owner decides the priority and the remedy, and the row is then moved to Not started, Deferred or retired with a dated decision.
+
+##### Dependencies And Decisions
+
+- Decision Date: 2026-11-10. The owner chose to register the observation as a backlog row with the priority and the remedy undecided.
+
+##### Implementation Plan
+
+Plan Status: draft
+Plan Acceptance: none
+Implementation Authorization: none
+Superseded Plan Artifacts: none
+
+1. Decide the remedy with the owner, then plan the template change and a case that changes the open detection and the scale and reads every update between.
+
+##### Test Plan
+
+| Label | Layer | Method | Environment | Expected Result |
+| --- | --- | --- | --- | --- |
+| T1 | Integration | Change the open detection and the scale of a channel while the IOC runs and read every update of its record. | Common integration environment | No published value lies outside the old and the new reading; the template before the change publishes one. |
+
+##### Verification Results
+
+| Label | Observed At | Environment | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| T1 | Not run | Common integration environment | Pending | none |
+
+##### Closure Evidence
+
+- Observed 2026-11-09 and 2026-11-10 on the real TC-32 with the measComp-repository IOC (default template, `SCAN` one second, scratch builds of 4884b71): at the open-detection write of 11:26:16 the channel published -4720.89 and, at the reattach about 3 minutes later, -8416.18, each as a valid value without alarm; the cut sensor gave -7887.71 and -8801.9 in the same way; at scale changes one update mixed the units (channel 2: 32.39 and 87.40 from Celsius to Fahrenheit and to Kelvin, 15.66 and 20.51 into and out of Volts; channel 31: 59.77, 211.48, 148.82 and 9.53). Arithmetic, not checked in the code: -4720.89 equals 9 of 19 polls at -9999 and the rest at 29.41, and -8416.18 equals 16 of 19 at -9999 and the rest at 25.70, with about 19 polls in one second.
+- Observed 2026-11-09 13:24 to 13:26 on the same device with the site IOC (`tcmd` 498510d, `asynFloat64`, `MDEL` -1) built against measComp 4884b71: the next update after each open-detection and scale change showed the new state with no intermediate value.
 
 ##### GitHub Projection
 
