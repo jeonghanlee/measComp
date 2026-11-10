@@ -7,6 +7,7 @@ configure/*.local
 /db/
 dbd/
 _docs/
+/work/
 html/
 include/
 lib/
