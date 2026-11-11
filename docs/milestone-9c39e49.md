@@ -8,11 +8,11 @@ Git upstream: origin/site
 Remote tracker: [jeonghanlee/measComp milestone 2](https://github.com/jeonghanlee/measComp/milestone/2)
 GitHub milestone: Network thermocouple acquisition
 Due date: none
-Remote milestone observed at: 2026-11-11T09:15:36Z; state: open; one open issue (#15) and four closed issues (#11 to #14)
+Remote milestone observed at: 2026-11-11T16:15:34Z; state: open; no open issue and five closed issues (#11 to #15)
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/2`.
 Baseline commit: 9c39e491e463fac77f15cfcec16aa8b4a97cbf10
 
-Next session entry point: Implement and verify M5 (issue #15, the temperature filter on Linux): the plan was accepted and its implementation authorized on 2026-11-11, to document that the `Filter` record has no effect on Linux and to name the TC-32 filter control; M4 is complete, landed on `origin/site`, and issue #14 is closed. The fixture can use the per-channel values and the request shape that the single-request read added to `tests/TC32.pm`. Issues #11 to #14 are closed and #15 remains in GitHub milestone 2.
+Next session entry point: No row of the Milestone is open and all five issues of GitHub milestone 2 (#11 to #15) are closed; choose the next work from the Backlog with the owner: M6, M9, M10 and M11 are Open and need an owner decision on scope before a plan can be written, and M7 and M8 are Blocked by G1, the USB board. The fixture can use the per-channel values and the request shape that the single-request read added to `tests/TC32.pm`.
 
 ## Scope
 
@@ -32,9 +32,9 @@ The common integration environment is Linux with the real measComp driver, EPICS
 | M2 | Persistent read error logging | Carry-forward | Complete | No | | A persistent thermocouple read error is reported once per change; issue #12; [detail](#m2---persistent-read-error-logging) |
 | M3 | Single-request thermocouple read and acquisition time | Carry-forward | Complete | No | | One temperature request per scale group per poll with one acquisition timestamp; issue #13; [detail](#m3---single-request-thermocouple-read-and-acquisition-time) |
 | M4 | Thermocouple device diagnostics | Carry-forward | Complete | No | | Cold-junction temperatures, mains rejection and calibration information are exposed; issue #14; [detail](#m4---thermocouple-device-diagnostics) |
-| M5 | Temperature filter on Linux | Carry-forward | In progress | No | | The documentation states that the temperature filter record has no effect on Linux and names the TC-32 filter control; issue #15; [detail](#m5---temperature-filter-on-linux) |
+| M5 | Temperature filter on Linux | Carry-forward | Complete | No | | The documentation states that the temperature filter record has no effect on Linux and names the TC-32 filter control; issue #15; [detail](#m5---temperature-filter-on-linux) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: four Complete and one In progress. `Ready` records dependency readiness only. No external prerequisite is established for these rows.
+The row order follows issue numbers and imposes no execution dependency. Current status: five Complete. `Ready` records dependency readiness only. No external prerequisite is established for these rows.
 
 ### Milestone Details
 
@@ -417,7 +417,7 @@ Last Compared: 2026-11-11T09:15:36Z; remote updated at 2026-11-11T09:15:21Z
 Origin: 9c39e49 / M5
 Identity History: none
 GitHub Issue: [#15](https://github.com/jeonghanlee/measComp/issues/15)
-Status: In progress
+Status: Complete
 
 ##### Summary
 
@@ -474,16 +474,19 @@ Superseded Plan Artifacts: the plan of 2026-11-08 to average successive readings
 - Read 2026-11-11 in the ULDAQ source: the bit named `filter` of the measurement byte of the TC-32 holds the rejection frequency (set for `AI_RFT_50HZ`), so the filter and the rejection frequency are one setting; the flags of `ulTIn()` are `TIN_FF_DEFAULT` and `TIN_FF_WAIT_FOR_NEW_DATA`.
 - Read 2026-11-11 in `measCompSupport/cbw.h`: `FILTER` (0x0000) "Filter thermocouple inputs" and `NOFILTER` (0x0400) "Disable filtering for thermocouple", with no averaging defined. In the early Linux drivers of the board vendor the filter of the USB-TEMP and USB-TC boards is the board setting `FILTER_RATE`, "Filter update rate", with no documented values. The Universal Library documentation of the option could not be read from the host, because the site refused automated requests. Hypothesis, not verified: the Windows option selects a device-side filter; it is not examined for boards other than the TC-32.
 - Limit: `sphinx-build` is not installed on the host, so the changed documentation cannot be rendered here.
+- Landed: observed 2026-11-11T16:15:34Z after `git fetch`, `origin/site` is at commit a9d1fe05a056f4ecfec0740449ec7c8b15aad06a, the same commit as the local `HEAD`, and the two paths changed by the implementation commit 4b6e49a (`docs/source/measCompMultiFunctionDoc.rst`, `measCompApp/src/drvMultiFunction.cpp`) show no difference between `HEAD` and `origin/site`. Recheck with `git diff 4b6e49a origin/site -- <path>`.
+- Issue: the owner delegated the issue operations on 2026-11-11; the title was narrowed to the documentation of the filter record, the body was rewritten for the implemented change and its three acceptance criteria were checked, a closing comment was posted and issue #15 was closed as completed at 2026-11-11T16:15:24Z. The read-back shows state CLOSED, reason COMPLETED, label bug and milestone 2.
+- Remaining behavior: the driver does not average readings and does not connect the record to the device settings of other boards; what the Windows option does on them is not established and needs the USB board of row G1.
 
 ##### GitHub Projection
 
-Title: Make the temperature filter setting take effect on Linux
+Title: Document that the temperature filter record has no effect on Linux
 Labels: bug
 GitHub Milestone: Network thermocouple acquisition (milestone 2)
-Observed State: open
+Observed State: closed
 Observed Labels: bug
 Observed Milestone: Network thermocouple acquisition (milestone 2)
-Last Compared: 2026-11-08T05:09:19Z; remote updated at 2026-11-08T05:09:19Z
+Last Compared: 2026-11-11T16:15:34Z; remote updated at 2026-11-11T16:15:24Z
 
 ## Backlog
 
