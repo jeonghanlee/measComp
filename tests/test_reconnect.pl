@@ -1515,7 +1515,7 @@ sub exercise_diagnostics {
         {cold_junction => [$failed_first->{severity}, $failed_last->{severity}], state => $failed_state});
     check($run, 'temperature diagnostics a persistent cold-junction failure is reported once', @starts == 1, [@starts]);
     check($run, 'temperature diagnostics LAST_ERROR_MESSAGE names the cold junction',
-        $message->{status} == 0 && $message->{text} =~ /cold junction/i, $message);
+        $message->{status} == 0 && ($message->{text} =~ /cold junction/i ? 1 : 0), $message);
     $device->{fault} = undef;
     wait_record($run, 'TEST:T0ColdJunction', 25.5);
     healthy($run, 22.5);
