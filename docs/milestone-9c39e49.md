@@ -12,7 +12,7 @@ Remote milestone observed at: 2026-11-11T09:15:36Z; state: open; one open issue 
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/2`.
 Baseline commit: 9c39e491e463fac77f15cfcec16aa8b4a97cbf10
 
-Next session entry point: Start M5 (issue #15, the temperature filter on Linux), the nearest Ready row; M4 is complete, landed on `origin/site`, and issue #14 is closed. The fixture can use the per-channel values and the request shape that the single-request read added to `tests/TC32.pm`. Issues #11 to #14 are closed and #15 remains in GitHub milestone 2.
+Next session entry point: Implement and verify M5 (issue #15, the temperature filter on Linux): the plan was accepted and its implementation authorized on 2026-11-11, to document that the `Filter` record has no effect on Linux and to name the TC-32 filter control; M4 is complete, landed on `origin/site`, and issue #14 is closed. The fixture can use the per-channel values and the request shape that the single-request read added to `tests/TC32.pm`. Issues #11 to #14 are closed and #15 remains in GitHub milestone 2.
 
 ## Scope
 
@@ -32,9 +32,9 @@ The common integration environment is Linux with the real measComp driver, EPICS
 | M2 | Persistent read error logging | Carry-forward | Complete | No | | A persistent thermocouple read error is reported once per change; issue #12; [detail](#m2---persistent-read-error-logging) |
 | M3 | Single-request thermocouple read and acquisition time | Carry-forward | Complete | No | | One temperature request per scale group per poll with one acquisition timestamp; issue #13; [detail](#m3---single-request-thermocouple-read-and-acquisition-time) |
 | M4 | Thermocouple device diagnostics | Carry-forward | Complete | No | | Cold-junction temperatures, mains rejection and calibration information are exposed; issue #14; [detail](#m4---thermocouple-device-diagnostics) |
-| M5 | Temperature filter on Linux | Carry-forward | Not started | Yes | | The temperature filter takes effect on Linux; issue #15; [detail](#m5---temperature-filter-on-linux) |
+| M5 | Temperature filter on Linux | Carry-forward | In progress | No | | The documentation states that the temperature filter record has no effect on Linux and names the TC-32 filter control; issue #15; [detail](#m5---temperature-filter-on-linux) |
 
-The row order follows issue numbers and imposes no execution dependency. Current status: four Complete and one Not started. `Ready` records dependency readiness only. No external prerequisite is established for these rows.
+The row order follows issue numbers and imposes no execution dependency. Current status: four Complete and one In progress. `Ready` records dependency readiness only. No external prerequisite is established for these rows.
 
 ### Milestone Details
 
@@ -417,7 +417,7 @@ Last Compared: 2026-11-11T09:15:36Z; remote updated at 2026-11-11T09:15:21Z
 Origin: 9c39e49 / M5
 Identity History: none
 GitHub Issue: [#15](https://github.com/jeonghanlee/measComp/issues/15)
-Status: Not started
+Status: In progress
 
 ##### Summary
 
@@ -425,46 +425,55 @@ The `$(P)$(R)Filter` record writes `TEMPERATURE_FILTER`, which the Windows path 
 
 ##### Scope
 
-Apply the filter in the driver on Linux by averaging successive readings, following the meaning of the Windows option.
+Document that the `Filter` record has no effect on Linux and name the control that the TC-32 has: its only filter is the 50 Hz or 60 Hz noise filter of its A/D converter, set by the rejection frequency record.
 
-Out of scope: Boards not read through `ulTIn()` and the Windows behavior.
+Out of scope: Averaging in the driver, the meaning of the Windows option on boards other than the TC-32 (they need the USB board of row G1), boards not read through `ulTIn()`, and the Windows behavior.
 
 ##### Completion Criteria
 
-- With the filter enabled, the published value is the average defined by the Windows behavior; disabled, it is the latest reading.
-- The setting survives a reconnect.
-- A shipped case checks filtered and unfiltered values, and the existing cases pass unchanged.
+- `docs/source/measCompMultiFunctionDoc.rst` states that Linux does not use the value of the `Filter` record and that the filter of the TC-32 is set by its rejection frequency record.
+- The comment of the Linux read path in `measCompApp/src/drvMultiFunction.cpp` states why the value is not used; the behavior of the driver does not change.
+- The existing cases pass unchanged.
 - The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
 
 ##### Dependencies And Decisions
 
 - None. No work or external gate must complete first.
 - Decision Date: 2026-11-08. The owner assigned this work to the Network thermocouple acquisition milestone, GitHub milestone 2.
+- Decision Date: 2026-11-11. The owner chose to document that the `Filter` record has no effect on Linux and to name the filter control of the TC-32, instead of averaging in the driver or connecting the record to the device settings of other boards. No document defines an averaging for the Windows option, the only filter of the TC-32 is its rejection frequency, which the diagnostics records already set, and the other boards cannot be checked without the USB board of row G1.
 
 ##### Implementation Plan
 
-Plan Status: draft
-Plan Acceptance: none
-Implementation Authorization: none
-Superseded Plan Artifacts: none
+Plan Status: accepted
+Plan Acceptance: 2026-11-11; accepted by the owner after the direction was decided on the evidence of the TC-32 documents; no separate review pass was held before acceptance, and the documentation of the new TC-32 records in the rst file is not part of the plan.
+Implementation Authorization: 2026-11-11; implement and verify the accepted plan items 1 and 2.
+Superseded Plan Artifacts: the plan of 2026-11-08 to average successive readings in the driver
 
-1. Implement the change described in Scope in `measCompApp/src/drvMultiFunction.cpp` with the shipped test case named in the Completion Criteria. Verified by T1.
+1. In `docs/source/measCompMultiFunctionDoc.rst`, change the `$(P)$(R)Filter` entry of the temperature record table: Linux does not use the value because ULDAQ has no such option; for the TC-32 the filter is the noise filter of its A/D converter, set by the `$(P)Bank0RejectFreq` record of `measCompApp/Db/TC32Network.substitutions`; the option is not examined for other boards. Verified by T1.
+2. In `measCompApp/src/drvMultiFunction.cpp`, replace the comment "cbTin has a filter option but ulTin does not?" in the Linux read path by a statement of what ULDAQ offers (the flags `TIN_FF_DEFAULT` and `TIN_FF_WAIT_FOR_NEW_DATA` only) and that the record value is therefore not used. No code changes. Verified by T2.
 
 ##### Test Plan
 
 | Label | Layer | Method | Environment | Expected Result |
 | --- | --- | --- | --- | --- |
-| T1 | Integration | Run the new shipped case and the existing cases with the README commands. | Common integration environment | The Completion Criteria hold and the existing cases pass. |
+| T1 | Documentation | Read the changed passage of the rst file from the seat of a user who configures a TC-32 and check every statement against its source named in Closure Evidence: the TC-32 User's Guide, the ULDAQ source and `measCompSupport/cbw.h`. | Repository documents in the working tree | The reader can tell that the `Filter` record has no effect on Linux and which record sets the TC-32 filter, and every statement matches its source. |
+| T2 | Regression | Compile `drvMultiFunction.cpp`, then run every case of `tests/test_reconnect.pl` and the exit loop with the README commands. | Debian 13 | The file compiles, all cases pass unchanged, every IOC exits normally. |
 
 ##### Verification Results
 
 | Label | Observed At | Environment | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| T1 | Not run | Common integration environment | Pending | none |
+| T1 | 2026-11-11, finished by 10:37:56Z | Repository documents in the working tree | Pass: three second-person reads by delegated readers followed the changed `Filter` entry of the rst file and the comment of the driver, from the seats of a TC-32 user and a maintainer, of a Windows TC-32 user and a Linux USB-2408 user, and of a Linux USB TC-32 user, and checked each statement against the TC-32 User's Guide, the ULDAQ header, the code paths and the record names. The first read found one minor finding (the entry named a record that does not work on Windows) and the second one (it named a record that the driver does not expose for the USB TC-32); both were corrected, and the third found nothing above the floor. Five info items were left unchanged | Source identity: `docs/source/measCompMultiFunctionDoc.rst` SHA-256 `19a7f80f34e7af50597de6094f678df320ff9e3ea601373e0bff0f8c47bc330b` |
+| T2 | 2026-11-11T10:24:56Z to 10:37:38Z | Debian 13, Perl 5.40.1; EPICS Base 7.0.10 and asyn 4.46.0 of the 1.5.0 distribution | Pass: the real IOC built by `tests/build_reconnect.pl` with the changed driver (build exit 0); the 30 cases pass 1,138 assertions with every IOC exit 0, and `endpoint-same-ip` passes 150 of 150 runs | Source identity: `drvMultiFunction.cpp` SHA-256 `33356351fc067eeca8e1d3b2a63c060c408ff7b5f6271c05826ccaefe297cf98`; `tests/test_reconnect.pl` `b7518f8e054f9bb3dc5a8a04e11c18d96ddcd5b0b7a59eb51fda920183ef99ef`; the run directory is in the session's temporary directory and is not retained |
 
 ##### Closure Evidence
 
-- Found 2026-11-08 by reading the poller and the template; not measured. The exact Windows averaging is taken from the Universal Library documentation before implementation. No plan is accepted yet.
+- Found 2026-11-08 by reading the poller and the template; not measured.
+- Read 2026-11-11 in the TC-32 User's Guide, chapter Specifications, Table 1: the A/D converter is Delta-Sigma with 24 bits, one for each 16 inputs; the entry "Filtering options" is "50 Hz or 60 Hz noise filtering, software-selectable"; the input bandwidth is 22 Hz with 50 Hz filtering and 26 Hz with 60 Hz filtering; the enabled inputs are converted continuously at the maximum converter rate (Note 1). The guide describes no averaging or other filter option.
+- Read 2026-11-11 in the InstaCal board configuration screen of the TC-32, kept in the site's device configuration notes: the Measurement Settings tab offers Reject Frequency, Calibration Coefficients, Detect Open TC and the thermocouple type of each channel, and no filter or averaging setting.
+- Read 2026-11-11 in the ULDAQ source: the bit named `filter` of the measurement byte of the TC-32 holds the rejection frequency (set for `AI_RFT_50HZ`), so the filter and the rejection frequency are one setting; the flags of `ulTIn()` are `TIN_FF_DEFAULT` and `TIN_FF_WAIT_FOR_NEW_DATA`.
+- Read 2026-11-11 in `measCompSupport/cbw.h`: `FILTER` (0x0000) "Filter thermocouple inputs" and `NOFILTER` (0x0400) "Disable filtering for thermocouple", with no averaging defined. In the early Linux drivers of the board vendor the filter of the USB-TEMP and USB-TC boards is the board setting `FILTER_RATE`, "Filter update rate", with no documented values. The Universal Library documentation of the option could not be read from the host, because the site refused automated requests. Hypothesis, not verified: the Windows option selects a device-side filter; it is not examined for boards other than the TC-32.
+- Limit: `sphinx-build` is not installed on the host, so the changed documentation cannot be rendered here.
 
 ##### GitHub Projection
 
