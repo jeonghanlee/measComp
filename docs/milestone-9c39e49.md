@@ -12,7 +12,7 @@ Remote milestone observed at: 2026-11-11T16:15:34Z; state: open; no open issue a
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/2`.
 Baseline commit: 9c39e491e463fac77f15cfcec16aa8b4a97cbf10
 
-Next session entry point: No row of the Milestone is open and all five issues of GitHub milestone 2 (#11 to #15) are closed; M11 (document the mixed value of the averaging temperature record) is Complete; the Backlog still has M9, narrowed to the two analog input reads at a low priority and still Open, and M10, which is Open and needs an owner decision on its priority and fixture scope before a plan of its own with an E-TC fixture can be written. The work for USB boards (the exit of the USB counter poller, the generator transport error and the open-detect result at an input type change) was taken out on 2026-11-11 because the site has no USB board; it is recorded in `docs/CLOSED_DOORS.md`, and GitHub issues #9 and #10 of the last two were closed as not planned on 2026-11-11. The new TC-32 diagnostic records reach the site only after the distribution moves its measComp pin (`SRC_TAG_MEASCOMP`, now `c38974e` in `configure/RELEASE` of the EPICS-env repository) to a commit of this branch, and after the site database of the tcmd repository loads them; the owner asked the EPICS-env session on 2026-11-11 to use the new measComp at its next release, where the pin is the decision of that session's owner, and the tcmd session was told to wait for that. The fixture can use the per-channel values and the request shape that the single-request read added to `tests/TC32.pm`.
+Next session entry point: No row of the Milestone is open and all five issues of GitHub milestone 2 (#11 to #15) are closed; M11 (document the mixed value of the averaging temperature record) is Complete; the Backlog still has M9, narrowed to the two analog input reads at a low priority and still Open, and M10, which is Open and needs an owner decision on its priority and fixture scope before a plan of its own with an E-TC fixture can be written. The work for USB boards (M6, the exit of the USB counter poller; M7, the generator transport error; M8, the open-detect result at an input type change; and the gate G1) was retired as Complete on 2026-11-11 because the site has no USB board, and GitHub issues #9 and #10 of M7 and M8 were closed as not planned the same day. The new TC-32 diagnostic records reach the site only after the distribution moves its measComp pin (`SRC_TAG_MEASCOMP`, now `c38974e` in `configure/RELEASE` of the EPICS-env repository) to a commit of this branch, and after the site database of the tcmd repository loads them; the owner asked the EPICS-env session on 2026-11-11 to use the new measComp at its next release, where the pin is the decision of that session's owner, and the tcmd session was told to wait for that. The fixture can use the per-channel values and the request shape that the single-request read added to `tests/TC32.pm`.
 
 ## Scope
 
@@ -495,11 +495,226 @@ Last Compared: 2026-11-11T16:15:34Z; remote updated at 2026-11-11T16:15:24Z
 
 | ID | Work unit | Type | Status | Ready | Deps | Done when / Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
+| M6 | USB counter poller exit race | Carry-forward | Complete | No |  | `drvUSBCTR.cpp` stops and joins its poller before the process exits, as the multifunction driver does, verified by a build and by reading the code; the exit abort is not reproduced without a USB counter; retired on 2026-11-11 because the site has no USB board; [detail](#m6---usb-counter-poller-exit-race) |
+| M7 | Generator transport-error handling | Carry-forward | Complete | No | G1 | A transport error in a generator write disconnects the port and the first error code is kept; the network temperature devices are unchanged; retired on 2026-11-11 because the site has no USB board; [detail](#m7---generator-transport-error-handling) |
+| M8 | Open-detect result on input type change | Carry-forward | Complete | No | G1 | A connection error from the open-detect call in the input-type branch disconnects the port; retired on 2026-11-11 because the site has no USB board; [detail](#m8---open-detect-result-on-input-type-change) |
 | M9 | Persistent errors of the other poll-loop reads | Carry-forward | Open | No |  | The two analog input reads report a persistent error once per change as the temperature read does, or the owner records that they need not; the digital input, counter and scan status reads already report once per outage; the priority is low and the fixture is undecided; [detail](#m9---persistent-errors-of-the-other-poll-loop-reads) |
 | M10 | E-TC array read | Carry-forward | Open | No |  | The E-TC reads its channels with one request per poll and exposes its cold-junction temperatures, calibration table and calibration dates, verified with an E-TC protocol fixture; priority and fixture scope are undecided; [detail](#m10---e-tc-array-read) |
 | M11 | Mixed value at a state change of the averaging temperature record | Carry-forward | Complete | No |  | The user documentation states that the default temperature template publishes one value that mixes the old and the new state at each open-detection or scale change, and which setting avoids it; the default template is unchanged; [detail](#m11---mixed-value-at-a-state-change-of-the-averaging-temperature-record) |
+| G1 | USB board for hardware verification | External gate | Complete | No |  | A USB board that exercises M7 or M8 is available and its model is recorded; retired on 2026-11-11 because the site has no USB board; [detail](#g1---usb-board-for-hardware-verification) |
 
 ### Backlog Details
+
+#### M6 - USB Counter Poller Exit Race
+
+Origin: 9c39e49 / M6
+Identity History: none
+GitHub Issue: none
+Status: Complete
+
+##### Summary
+
+`measCompApp/src/drvUSBCTR.cpp` starts a `USBCTRPoller` thread with `epicsThreadCreate()` and its loop runs in `while(1)` with no stop condition and no join, the pattern that makes a two-port multifunction IOC abort while exiting when the vendor library deletes its devices during `exit()`. The same exit race is therefore likely, but it was not reproduced: no device or fixture exercises the USB counter driver here. The file compiles with the `mca` and `scaler` modules of the 1.5.0 distribution (read 2026-11-11).
+
+##### Scope
+
+Give the USB counter driver the same stop and join exit handler as the multifunction driver, and verify it by building the driver and by reading the changed code; the exit abort is not reproduced.
+
+Out of scope: the multifunction driver, which is fixed separately, and Windows.
+
+##### Completion Criteria
+
+- The poller thread of `measCompApp/src/drvUSBCTR.cpp` is joinable, ends when an exit handler asks it, and the handler waits for it before the vendor library releases its devices.
+- The measComp support application builds with the change in an environment that provides the `mca` and `scaler` modules.
+- The limit that the exit abort was not reproduced for lack of a USB counter is recorded in Closure Evidence.
+
+##### Dependencies And Decisions
+
+- None. The `mca` and `scaler` modules that the build needs are in the 1.5.0 distribution.
+- Decision Date: 2026-11-11. The owner chose to verify the change by building the driver and reading the code, accepting that the exit abort is not reproduced without a USB counter, and to update the closed-door record that said the file cannot be compiled.
+- Decision Date: 2026-11-11. The owner declined this work because the site has no USB board, and the row is retired.
+
+##### Implementation Plan
+
+Plan Status: draft
+Plan Acceptance: none
+Implementation Authorization: none
+Superseded Plan Artifacts: none
+
+1. In `measCompApp/src/drvUSBCTR.cpp`, create the poller with `epicsThreadCreateOpt` and `joinable` set, add a stop flag and a `stopPoller()` that sets it, wakes the poller and joins it without holding the port lock, register it with `epicsAtExit`, let the loop test the flag, and replace the `epicsThreadSleep()` that ends each pass by a wait on an event that `stopPoller()` signals, as the multifunction driver does. Verified by T1 and T2.
+2. In `docs/CLOSED_DOORS.md`, update the record of the build verification of `drvUSBCTR.cpp`: the file compiles with the `mca` and `scaler` modules of the 1.5.0 distribution. Verified by T2.
+
+##### Test Plan
+
+| Label | Layer | Method | Environment | Expected Result |
+| --- | --- | --- | --- | --- |
+| T1 | Build | Build the measComp support application with the changed `drvUSBCTR.cpp` in a scratch copy made with `git archive`, against the 1.5.0 distribution (`configure/RELEASE.local`, `make CHECK_RELEASE=NO`). | Debian 13, EPICS Base 7.0.10, the 1.5.0 distribution with the `mca` and `scaler` modules | The build exits 0 and `drvUSBCTR.cpp` compiles and links without a new warning. |
+| T2 | Review | Read the changed code and the changed closed-door record from the seat of a maintainer who must keep the exit path safe: the stop flag, the join without the port lock held, the exit handler registration and the wait that replaces the sleep. | Repository source in the working tree | The reader can follow the stop and the join and finds no path where the poller uses released state or the join waits on a lock that the poller needs. |
+
+##### Verification Results
+
+| Label | Observed At | Environment | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| T1 | Not run | Debian 13, the 1.5.0 distribution | Pending | none |
+| T2 | Not run | Repository source in the working tree | Pending | none |
+
+##### Closure Evidence
+
+- Observed 2026-11-07 while reviewing the multifunction exit fix: `drvUSBCTR.cpp` lines 434 and 1499 show the thread creation and the unconditional loop. The build verification of this file was declined on 2026-11-06 and is recorded in `docs/CLOSED_DOORS.md`; this row concerns the exit pattern, not that build verification.
+- Read 2026-11-11: `g++ -fsyntax-only` of `drvUSBCTR.cpp` with the `mca-687d563`, `scaler-baa8e1c` and ULDAQ headers of the 1.5.0 distribution exits 0 without a warning, so the statement that the file cannot be compiled here no longer holds.
+- Read 2026-11-11: the multifunction driver creates its poller with `epicsThreadCreateOpt` and `joinable` set, registers `stopPoller()` with `epicsAtExit` and wakes the poller through an event; the USB counter loop ends each pass with `epicsThreadSleep()` of the poll time, which is 50 ms by default and can be set longer.
+- Limit: no device or fixture exercises the USB counter driver here, so the exit abort cannot be reproduced; the owner accepted verification by build and code reading on 2026-11-11.
+- Retired 2026-11-11: the owner declined this work because the site has no USB board and runs network TC-32 and E-TC devices only. Waived checks: the build of the measComp support application with the change (T1), the reading of the changed exit path (T2) and the three Completion Criteria; nothing was changed in `drvUSBCTR.cpp`. The finding stays as read: the thread of `USBCTR` runs a `while(1)` loop with no stop condition and no join, and the multifunction driver was fixed in commit 5a0fb27.
+
+##### GitHub Projection
+
+Title: none
+Labels: none
+GitHub Milestone: none
+Observed State: none
+Observed Labels: none
+Observed Milestone: none
+Last Compared: never
+
+#### M7 - Generator Transport Error Handling
+
+Origin: 9c39e49 / M7
+Identity History: none
+GitHub Issue: [#9](https://github.com/jeonghanlee/measComp/issues/9)
+Status: Complete
+
+##### Summary
+
+`writeFloat64()` restarts a running pulse generator or waveform generator with vendor calls and returns `asynError` on a failure without disconnecting the port, unlike `writeInt32()` and `writeUInt32Digital()`. The stop and restart pairs at five sites accumulate their status with a bitwise OR, and 12 of the 21 pairs of different connection-error codes combine into a code that `isConnectionError()` rejects. Found by reading the code on 2026-11-07 and not reproduced. The paths run on the USB boards with a pulse generator (USB-1608G, USB-1608HS-2AO, USB-1808) or an analog output scan, and the digitizer restart also on the network E-1608; the network temperature devices TC32 and E-TC reach none of them.
+
+##### Scope
+
+Add the connection-error disconnect to `writeFloat64()` and keep the first non-zero error code at the five OR sites.
+
+Out of scope: the pulse generator running state in `disconnect()`, whose handling depends on how the vendor library leaves a running timer after a transport loss, the reconnection policy, discovery and the poller.
+
+##### Completion Criteria
+
+- A transport error from a generator stop or restart in `writeFloat64()` disconnects the port and marks the inputs disconnected.
+- Different connection-error codes from the stop and the restart still disconnect the port at all five sites.
+- The shipped cases, including the network temperature device cases, pass unchanged.
+- A hardware check on a USB board with a pulse generator or waveform generator records the disconnect, with the board model and library version.
+- The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
+
+##### Dependencies And Decisions
+
+- G1: the hardware check needs a USB board; the regression checks do not.
+- Decision Date: 2026-11-08. The owner decided to fix both this item and M8 and to keep them in the Backlog for now; the USB board is not known to exist.
+- Decision Date: 2026-11-11. The owner declined this work because the site has no USB board, and the row is retired.
+
+##### Implementation Plan
+
+Plan Status: draft
+Plan Acceptance: none
+Implementation Authorization: none
+Superseded Plan Artifacts: none
+
+1. In `measCompApp/src/drvMultiFunction.cpp`, replace the OR accumulation at the five sites by a first-error accumulation and add the `isConnectionError()` and `disconnect()` step to `writeFloat64()` after the vendor mutex is released. Verified by T1 and T2.
+
+##### Test Plan
+
+| Label | Layer | Method | Environment | Expected Result |
+| --- | --- | --- | --- | --- |
+| T1 | Regression | Run every case of `tests/test_reconnect.pl` and the exit loop with the README commands, and the Perl checks and the compile of the changed C++ files in the Rocky 8 image with the commands of the README section "Static checks"; the cases that use the TC32 and E-TC protocol fixtures are the guard for the network temperature devices. | Common integration environment; Rocky 8 image | All pass with normal IOC exit; the changed files compile on Rocky 8. |
+| T2 | Hardware | Unplug a USB board with a pulse generator or waveform generator while a generator parameter changes and read the port state and log. | A USB board that has the feature (G1) | The port is disconnected and the inputs are marked disconnected. |
+
+##### Verification Results
+
+| Label | Observed At | Environment | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| T1 | Not run | Common integration environment | Pending | none |
+| T2 | Not run | USB board (G1) | Pending | none |
+
+##### Closure Evidence
+
+- Found 2026-11-07 during a coherence review of the completed work units, confirmed by reading the code and by computing the error-code combinations from `uldaq.h`; not reproduced. No plan is accepted yet.
+- Retired 2026-11-11: the owner declined this work because the site has no USB board and runs network TC-32 and E-TC devices only. Waived checks: the regression run (T1), the hardware check on a USB board (T2) and the five Completion Criteria; nothing was changed in `drvMultiFunction.cpp`. The finding stays as read on 2026-11-07.
+- Issue: GitHub issue #9 was closed as not planned at 2026-11-11T18:33:27Z with a comment that gives the reason; the read-back shows state CLOSED, reason NOT_PLANNED, label bug and no milestone.
+
+##### GitHub Projection
+
+Title: Disconnect on transport errors when generator settings change and keep the first error code
+Labels: bug
+GitHub Milestone: none
+Observed State: closed
+Observed Labels: bug
+Observed Milestone: none
+Last Compared: 2026-11-11T23:00:44Z; remote updated at 2026-11-11T18:33:27Z
+
+#### M8 - Open Detect Result On Input Type Change
+
+Origin: 9c39e49 / M8
+Identity History: none
+GitHub Issue: [#10](https://github.com/jeonghanlee/measComp/issues/10)
+Status: Complete
+
+##### Summary
+
+When the analog input type changes to thermocouple, `writeInt32()` calls `setOpenThermocoupleDetect()` and drops its return value, while the other callers keep it, so a transport error in that call leaves the port connected and the write reporting success. The call is from the original upstream code and its siblings were changed when the thermocouple settings were made consistent after a reconnect. Found by reading the code on 2026-11-07 and not reproduced. The branch runs only on the USB-2408-2AO, the one board with a configurable input type; the network temperature devices TC32 and E-TC never run it.
+
+##### Scope
+
+Store the result of the open-detect call in the status that the end of `writeInt32()` classifies, keeping the first non-zero error code.
+
+Out of scope: other boards, the restore of the thermocouple settings after a reconnect and the reconnection policy.
+
+##### Completion Criteria
+
+- A connection error from the open-detect call in the input-type branch disconnects the port and `writeInt32()` returns `asynError`.
+- A non-transport error from that call returns `asynError` without disconnecting a healthy device.
+- The shipped cases, including the network temperature device cases, pass unchanged.
+- A hardware check on a USB-2408-2AO records the disconnect when the board is unplugged during the input type switch, with the board model and library version.
+- The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
+
+##### Dependencies And Decisions
+
+- G1: the hardware check needs a USB-2408-2AO; the regression checks do not.
+- Decision Date: 2026-11-08. The owner decided to fix both this item and M7 and to keep them in the Backlog for now; the USB board is not known to exist.
+- Decision Date: 2026-11-11. The owner declined this work because the site has no USB board, and the row is retired.
+
+##### Implementation Plan
+
+Plan Status: draft
+Plan Acceptance: none
+Implementation Authorization: none
+Superseded Plan Artifacts: none
+
+1. In `measCompApp/src/drvMultiFunction.cpp`, assign the result of the open-detect call in the input-type branch of `writeInt32()` to the status, keeping the first non-zero error code. Verified by T1 and T2.
+
+##### Test Plan
+
+| Label | Layer | Method | Environment | Expected Result |
+| --- | --- | --- | --- | --- |
+| T1 | Regression | Run every case of `tests/test_reconnect.pl` and the exit loop with the README commands, and the Perl checks and the compile of the changed C++ files in the Rocky 8 image with the commands of the README section "Static checks"; the cases that use the TC32 and E-TC protocol fixtures are the guard for the network temperature devices. | Common integration environment; Rocky 8 image | All pass with normal IOC exit; the changed file compiles on Rocky 8. |
+| T2 | Hardware | Unplug a USB-2408-2AO while the input type switches from voltage to thermocouple and read the port state and log. | A USB-2408-2AO (G1) | The port is disconnected and the write returns `asynError`. |
+
+##### Verification Results
+
+| Label | Observed At | Environment | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| T1 | Not run | Common integration environment | Pending | none |
+| T2 | Not run | USB-2408-2AO (G1) | Pending | none |
+
+##### Closure Evidence
+
+- Found 2026-11-07 during a coherence review of the completed work units, confirmed by reading the code and the commit history of the call sites; not reproduced. No plan is accepted yet.
+- Retired 2026-11-11: the owner declined this work because the site has no USB board and runs network TC-32 and E-TC devices only. Waived checks: the regression run (T1), the hardware check on a USB-2408-2AO (T2) and the four Completion Criteria; nothing was changed in `drvMultiFunction.cpp`. The finding stays as read on 2026-11-07.
+- Issue: GitHub issue #10 was closed as not planned at 2026-11-11T18:33:45Z with a comment that gives the reason; the read-back shows state CLOSED, reason NOT_PLANNED, label bug and no milestone.
+
+##### GitHub Projection
+
+Title: Check the open thermocouple detection result when the analog input type changes
+Labels: bug
+GitHub Milestone: none
+Observed State: closed
+Observed Labels: bug
+Observed Milestone: none
+Last Compared: 2026-11-11T23:00:44Z; remote updated at 2026-11-11T18:33:45Z
 
 #### M9 - Persistent Errors Of The Other Poll-Loop Reads
 
@@ -690,6 +905,31 @@ Observed State: none
 Observed Labels: none
 Observed Milestone: none
 Last Compared: never
+
+#### G1 - USB Board For Hardware Verification
+
+Origin: 9c39e49 / G1
+GitHub Issue: none
+Status: Complete
+
+##### Summary
+
+M7 and M8 need a hardware check on a USB board: M7 on a board with a pulse generator (USB-1608G, USB-1608HS-2AO or USB-1808) or a waveform generator, M8 on a USB-2408-2AO. The owner has not confirmed that a USB board exists or which model it is. The responsible party is the owner; the affected work is M7 and M8. The regression checks of both do not depend on this gate.
+
+##### Completion Criteria
+
+- The owner confirms a USB board and its model, and the model is one of the boards that exercise M7 or M8, or the owner decides to waive the hardware check with a dated decision.
+
+##### Verification Results
+
+| Observed At | Result | Evidence |
+| --- | --- | --- |
+| 2026-11-08 | Pending | The owner does not know the model or whether the board exists. |
+| 2026-11-11 | Waived | The owner has no USB board, so the hardware check is waived and M7 and M8 are retired. |
+
+##### Closure Evidence
+
+- Retired 2026-11-11 in the same change as its last dependents M7 and M8: the owner declined this work because the site has no USB board and runs network TC-32 and E-TC devices only, so the gate is no longer required. The Completion Criterion is met by the dated decision of the owner to waive the hardware check.
 
 ## History
 
