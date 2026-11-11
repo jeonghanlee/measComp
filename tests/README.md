@@ -620,6 +620,26 @@ driver defect.
 | `no-value-check` | Remove the check of the value in `setBankConfig()`, so any integer reaches the device | `temperature diagnostics invalid values are rejected` in `temperature-diagnostics` |
 | `no-date-reread` | Read the bank information after the first connection only | `temperature diagnostics factory date is read again after a reconnect` in `temperature-diagnostics` |
 | `swapped-items` | Write the rejection frequency to the calibration table item of the device and the table to the rejection item | `temperature diagnostics rejection frequency set from its record` in `temperature-diagnostics` |
+| `cold-junction-offset` | Increase by one the value that the last `setDoubleParam()` call of the loop in `readColdJunctions()` publishes for each channel | `temperature diagnostics cold-junction records show the fixture values` in `temperature-diagnostics` |
+| `date-factory-only` | Publish the factory date and leave the field date unset | `temperature diagnostics field date is the fixture 60 Hz field date` in `temperature-diagnostics` |
+| `open-detect-inverted` | Write the opposite open detection mode to the device | `temperature diagnostics open detection written` in `temperature-diagnostics` |
+| `cal-table-not-written` | Send the rejection frequency to the device and report success for the calibration table without sending it | `temperature diagnostics calibration table set from its record` in `temperature-diagnostics` |
+| `setting-no-readback` | Leave the record value unchanged after a successful write of the rejection frequency or the calibration table | `temperature diagnostics settings read back` in `temperature-diagnostics` |
+| `setting-clears-field-date` | Clear the field date text when the rejection frequency or the calibration table is written | `temperature diagnostics field date does not follow a setting without a reconnect` in `temperature-diagnostics` |
+| `field-date-first-connection` | Publish the field date after the first connection only, and the factory date after every connection | `temperature diagnostics field date stays the 60 Hz date after a reconnect that lost the settings` in `temperature-diagnostics` |
+| `cold-junction-report-every-poll` | Remove the comparison with the previous status in `reportColdJunctionStatus()` | `temperature diagnostics a persistent cold-junction failure is reported once` in `temperature-diagnostics` |
+| `cold-junction-no-message` | In `reportColdJunctionStatus()`, replace the `reportError()` call by a trace print of the same text, `Calling TIn cold junction`, so that `LAST_ERROR_MESSAGE` is not set and the trace line still matches the search of the preceding assertion | `temperature diagnostics LAST_ERROR_MESSAGE names the cold junction` in `temperature-diagnostics` |
+| `cold-junction-recovery-text` | In `reportColdJunctionStatus()`, change the text `Cold junction read returned to normal` to one that the test no longer finds | `temperature diagnostics the cold-junction records recover and report it once` in `temperature-diagnostics` |
+
+Six assertions of `temperature-diagnostics` have no negative control. The
+cold-junction records following a change and the unchanged temperature records
+cannot be isolated, because an edit that breaks either also breaks an earlier
+assertion or the start-up wait, and the case stops at the first failed
+assertion. The readbacks after a reconnect are filled by two code paths, so a
+single edit leaves one of them in place. The field date at 50 Hz after the
+reconnect that kept the settings is not reached by the edit used for the field
+date. The fixture error list and the IOC exit check the test tool and the exit
+that every case and the exit loop observe.
 
 This test does not establish hardware power-cycle behavior, sustained network
 loss endurance, Channel Access client reconnection, EXP-32, USB or Windows support.
