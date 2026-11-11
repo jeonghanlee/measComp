@@ -12,7 +12,7 @@ Remote milestone observed at: 2026-11-11T16:15:34Z; state: open; no open issue a
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/2`.
 Baseline commit: 9c39e491e463fac77f15cfcec16aa8b4a97cbf10
 
-Next session entry point: No row of the Milestone is open and all five issues of GitHub milestone 2 (#11 to #15) are closed; the Backlog has M11 (document the mixed value of the averaging temperature record), in progress since the owner accepted its plan and authorized its implementation on 2026-11-11; M9, narrowed to the two analog input reads at a low priority and still Open; and M10, which is Open and needs an owner decision on its priority and fixture scope before a plan of its own with an E-TC fixture can be written. The work for USB boards (the exit of the USB counter poller, the generator transport error and the open-detect result at an input type change) was taken out on 2026-11-11 because the site has no USB board; it is recorded in `docs/CLOSED_DOORS.md`, and GitHub issues #9 and #10 of the last two were closed as not planned on 2026-11-11. The fixture can use the per-channel values and the request shape that the single-request read added to `tests/TC32.pm`.
+Next session entry point: No row of the Milestone is open and all five issues of GitHub milestone 2 (#11 to #15) are closed; M11 (document the mixed value of the averaging temperature record) is Complete; the Backlog still has M9, narrowed to the two analog input reads at a low priority and still Open, and M10, which is Open and needs an owner decision on its priority and fixture scope before a plan of its own with an E-TC fixture can be written. The work for USB boards (the exit of the USB counter poller, the generator transport error and the open-detect result at an input type change) was taken out on 2026-11-11 because the site has no USB board; it is recorded in `docs/CLOSED_DOORS.md`, and GitHub issues #9 and #10 of the last two were closed as not planned on 2026-11-11. The fixture can use the per-channel values and the request shape that the single-request read added to `tests/TC32.pm`.
 
 ## Scope
 
@@ -497,7 +497,7 @@ Last Compared: 2026-11-11T16:15:34Z; remote updated at 2026-11-11T16:15:24Z
 | --- | --- | --- | --- | --- | --- | --- |
 | M9 | Persistent errors of the other poll-loop reads | Carry-forward | Open | No |  | The two analog input reads report a persistent error once per change as the temperature read does, or the owner records that they need not; the digital input, counter and scan status reads already report once per outage; the priority is low and the fixture is undecided; [detail](#m9---persistent-errors-of-the-other-poll-loop-reads) |
 | M10 | E-TC array read | Carry-forward | Open | No |  | The E-TC reads its channels with one request per poll and exposes its cold-junction temperatures, calibration table and calibration dates, verified with an E-TC protocol fixture; priority and fixture scope are undecided; [detail](#m10---e-tc-array-read) |
-| M11 | Mixed value at a state change of the averaging temperature record | Carry-forward | In progress | No |  | The user documentation states that the default temperature template publishes one value that mixes the old and the new state at each open-detection or scale change, and which setting avoids it; the default template is unchanged; [detail](#m11---mixed-value-at-a-state-change-of-the-averaging-temperature-record) |
+| M11 | Mixed value at a state change of the averaging temperature record | Carry-forward | Complete | No |  | The user documentation states that the default temperature template publishes one value that mixes the old and the new state at each open-detection or scale change, and which setting avoids it; the default template is unchanged; [detail](#m11---mixed-value-at-a-state-change-of-the-averaging-temperature-record) |
 
 ### Backlog Details
 
@@ -629,7 +629,7 @@ Last Compared: never
 Origin: 9c39e49 / M11
 Identity History: none
 GitHub Issue: none
-Status: In progress
+Status: Complete
 
 ##### Summary
 
@@ -678,6 +678,8 @@ Superseded Plan Artifacts: none
 - Observed 2026-11-09 13:24 to 13:26 on the same device with the site IOC (`tcmd` 498510d, `asynFloat64`, `MDEL` -1) built against measComp 4884b71: the next update after each open-detection and scale change showed the new state with no intermediate value.
 - Read 2026-11-11 in the asyn R4-46 source (`devAsynFloat64.c`): `interruptCallbackAverage()` adds each published value to a sum and counts it, and `processAiAverage()` takes the mean and clears both when the record is processed; plain `asynFloat64` has no accumulator and reads the current value. `MDEL` -1 only makes the record post a monitor at every processing and does not change the averaging; the observations of the site record were made with both settings together.
 - Read 2026-11-11: the `$(P)$(R)` record of `measCompTemperatureIn.template` has `DTYP` `asynFloat64Average`, and the record table of the user documentation says only that the field should be scanned periodically; the site `TC32-alsu.substitutions` of the `tcmd` repository sets `DTYP=asynFloat64` and `MDEL=-1` for every channel.
+- Landed: observed 2026-11-11T19:41:11Z after `git fetch`, `origin/site` is at commit 853295be9000566b6440550572417fd36ec1f859, the same commit as the local `HEAD`, and the path changed by the implementation commit cb05c18 (`docs/source/measCompMultiFunctionDoc.rst`) shows no difference between that commit and `origin/site`. Recheck with `git diff cb05c18 origin/site -- <path>`. There is no linked issue.
+- Remaining behavior: the default template is unchanged and still publishes one mixed value at a change of the open detection or of the scale; a user who needs none uses a modified copy of the template with `DTYP` `asynFloat64`. The documentation could not be rendered, because `sphinx-build` is not installed on the host.
 
 ##### GitHub Projection
 
