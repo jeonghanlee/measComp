@@ -3459,7 +3459,8 @@ void MultiFunction::pollerThread()
           tempValue = (double) fVal;
         #else
           TempScale tempScale;
-          // cbTin has a filter option but ulTin does not?
+          // ulTIn() has no filter option: its flags are TIN_FF_DEFAULT and TIN_FF_WAIT_FOR_NEW_DATA only,
+          // so the value of the filter record, which cbTIn() takes as an option, is not used here.
           TInFlag flags = TIN_FF_DEFAULT;
           switch (scale) {
               case CELSIUS:     tempScale = TS_CELSIUS; break;

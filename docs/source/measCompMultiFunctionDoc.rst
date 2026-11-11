@@ -829,7 +829,14 @@ This database is loaded once for each temperature input channel.
     - mbbo
     - asynInt32
     - TEMPERATURE_FILTER
-    - Temperature filter. Choices are "Filter" (0) and "No filter" (0x400)
+    - Temperature filter. Choices are "Filter" (0) and "No filter" (0x400). The value is passed
+      to the Universal Library on Windows. It has no effect on Linux, because ULDAQ has no such
+      option for temperature inputs. The only filter of the TC-32 is the 50 Hz or 60 Hz noise
+      filter of its A/D converter. For a network TC-32 on Linux it is selected by the
+      $(P)Bank0RejectFreq record of TC32Network.substitutions, not by this record. That file is
+      loaded by the commented line of iocBoot/iocTC32/st.cmd, and its records need ULDAQ; the
+      driver does not expose the setting for the USB TC-32, and on Windows the setting is made
+      with InstaCal. The meaning of the option for other boards is not documented here.
 
 The following is the main medm screen for configuring the
 analog/temperature inputs on the USB-2408-2AO.
