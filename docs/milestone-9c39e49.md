@@ -12,7 +12,7 @@ Remote milestone observed at: 2026-11-11T16:15:34Z; state: open; no open issue a
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/2`.
 Baseline commit: 9c39e491e463fac77f15cfcec16aa8b4a97cbf10
 
-Next session entry point: No row of the Milestone is open and all five issues of GitHub milestone 2 (#11 to #15) are closed; choose the next work from the Backlog with the owner: M6, M9, M10 and M11 are Open and need an owner decision on scope before a plan can be written, and M7 and M8 are Blocked by G1, the USB board. The fixture can use the per-channel values and the request shape that the single-request read added to `tests/TC32.pm`.
+Next session entry point: No row of the Milestone is open and all five issues of GitHub milestone 2 (#11 to #15) are closed; the Backlog has M11 (document the mixed value of the averaging temperature record), whose draft plan the owner accepts and authorizes next; M9, narrowed to the two analog input reads at a low priority and still Open; and M10, which is Open and needs an owner decision on its priority and fixture scope before a plan of its own with an E-TC fixture can be written. The work for USB boards (the exit of the USB counter poller, the generator transport error and the open-detect result at an input type change) was taken out on 2026-11-11 because the site has no USB board; it is recorded in `docs/CLOSED_DOORS.md`, and GitHub issues #9 and #10 of the last two are still open. The fixture can use the per-channel values and the request shape that the single-request read added to `tests/TC32.pm`.
 
 ## Scope
 
@@ -141,7 +141,7 @@ A TC32 channel outside the common-mode range makes `ulTIn()` return `ERR_CMR_EXC
 
 Report a thermocouple channel's read error once when its status changes, with the channel number in the line, and once when the channel returns to normal at the same error trace level, keeping the per-channel INVALID status on every poll and the open-thermocouple value. The per-channel state starts over when the port connects and when a channel leaves the thermocouple type.
 
-Out of scope: Connection errors, the open-thermocouple value, the other read calls of the poll loop (digital input, counter, analog input and scan status), which M9 tracks, and Windows verification.
+Out of scope: Connection errors, the open-thermocouple value, the other read calls of the poll loop, of which only the analog input reads print on every poll and which M9 tracks, and Windows verification.
 
 ##### Completion Criteria
 
@@ -200,7 +200,7 @@ Source identity of the run: `drvMultiFunction.cpp` SHA-256 `41861dc736de48e1eacb
 
 - Landed: observed 2026-11-09T08:55:32Z after `git fetch`, `origin/site` is at commit 484166964308df93d2b98a5dffd27e5ca668c485, the same commit as the local `HEAD`, and the six paths changed by the implementation commit af3a71d (`measCompApp/src/drvMultiFunction.cpp`, `tests/TC32.pm`, `tests/reconnect_ioc.cpp`, `tests/test_reconnect.pl`, `tests/README.md`, `docs/reconnection.md`) show no difference between that commit and `origin/site`. Recheck with `git diff af3a71d origin/site -- <path>`.
 - Issue: the owner delegated the issue operations on 2026-11-09; the body was synchronized with the implemented behavior and its five acceptance criteria were checked, a closing comment was posted and issue #12 was closed as completed at 2026-11-09T08:52:13Z. The read-back shows state CLOSED, label bug and milestone 2.
-- Remaining behavior: the other reads of the poll loop (digital input, counter, analog input and scan status) still print an error on every poll; row M9 tracks them. The device value -8888 means an open thermocouple: ULDAQ turns it into the data value -9999 with `ERR_OPEN_CONNECTION`, and the driver already reports -9999 without an error (read in the ULDAQ 1.2.2 source 2026-11-09).
+- Remaining behavior: the analog input reads of the poll loop still print an error on every poll; row M9 tracks them (corrected 2026-11-11: the digital input, counter and scan status reads already report once per outage). The device value -8888 means an open thermocouple: ULDAQ turns it into the data value -9999 with `ERR_OPEN_CONNECTION`, and the driver already reports -9999 without an error (read in the ULDAQ 1.2.2 source 2026-11-09).
 
 - Observed 2026-11-09 on a real TC-32 by the session that has the device, builds of the commit 4884b71 in scratch copies and one IOC process for each run: with the open detection enabled an empty or cut input reads -9999 as a valid value with no error line, and with it disabled the same input reads ordinary temperatures, up to 1229 C for a cut thermocouple, as valid values with no alarm. A channel set to the disabled type through the asyn parameter `TEMPERATURE_SENSOR` with the ULDAQ value `AI_DISABLED` reads -11111 with no error line and the neighbouring channels do not change; writing the thermocouple type back restores it.
 - Observed 2026-11-09 in the same runs: the device applied each change of the open detection about 14 seconds after the write, and in each of those changes the common-mode error of one channel appeared once, with the line `Calling TIn channel 0, err=107 Common-mode voltage range exceeded`, the record INVALID for one update and `LAST_ERROR_MESSAGE` set, and half a second later the line `Channel 0 read returned to normal` and the message cleared; no line repeated for each poll while the input stayed open, for more than three minutes. The cause of the device's report at the change is not known, so the once-per-change reporting and the return-to-normal line are observed on hardware, but a persistent common-mode input was not applied. A power-off of the device in this state recovered with the open detection in effect from the first update.
@@ -401,6 +401,7 @@ Source identity of the run: `tests/test_reconnect.pl` SHA-256 `58cd851b913fa624d
 - Landed: observed 2026-11-11T09:15:36Z after `git fetch`, `origin/site` is at commit e38ae56202d342af35c414bcd099b1a3270ca1f2, the same commit as the local `HEAD`, and the twelve paths changed by the commits c3efe8e to e38ae56 (`.gitignore`, `measCompApp/src/drvMultiFunction.cpp`, `measCompApp/Db/measCompTemperatureCJC.template`, `measCompApp/Db/measCompTemperatureBank.template`, `measCompApp/Db/TC32Network.substitutions`, `iocBoot/iocTC32/st.cmd`, `tests/TC32.pm`, `tests/reconnect_ioc.cpp`, `tests/build_reconnect.pl`, `tests/test_reconnect.pl`, `tests/README.md`, `docs/reconnection.md`, and this register as of that commit) show no difference between `HEAD` and `origin/site`. The implementation is 1d0b251, the correction of the message assertion 101804a, and the documents 1e5c5ea and e38ae56. Recheck with `git diff e38ae56 origin/site -- <path>`.
 - Issue: the owner delegated the issue operations on 2026-11-11; the title was narrowed to the network TC32, the body was rewritten for the implemented behavior and its four acceptance criteria were checked, a closing comment was posted and issue #14 was closed as completed at 2026-11-11T09:15:21Z. The read-back shows state CLOSED, reason COMPLETED, label enhancement and milestone 2.
 - Remaining behavior: the E-TC counterparts are registered under row M10, which needs a protocol fixture first; the expansion bank has no records and was not exercised.
+- Documented after the closure, on 2026-11-11 and outside the Completion Criteria of this row: the user documentation `docs/source/measCompMultiFunctionDoc.rst` describes the five records (commit 2ae358c; it could not be rendered because `sphinx-build` is not installed on the host), and `tests/README.md` names the Rocky 8 image 1.1.0 with asyn 4.46 and the expected compile warnings (commit 872a1c5), which corrects the base that the limit of the T2 result above states as 1.2.2.
 
 ##### GitHub Projection
 
@@ -427,7 +428,7 @@ The `$(P)$(R)Filter` record writes `TEMPERATURE_FILTER`, which the Windows path 
 
 Document that the `Filter` record has no effect on Linux and name the control that the TC-32 has: its only filter is the 50 Hz or 60 Hz noise filter of its A/D converter, set by the rejection frequency record.
 
-Out of scope: Averaging in the driver, the meaning of the Windows option on boards other than the TC-32 (they need the USB board of row G1), boards not read through `ulTIn()`, and the Windows behavior.
+Out of scope: Averaging in the driver, the meaning of the Windows option on boards other than the TC-32 (the site has no USB board, so they are not examined), boards not read through `ulTIn()`, and the Windows behavior.
 
 ##### Completion Criteria
 
@@ -440,7 +441,7 @@ Out of scope: Averaging in the driver, the meaning of the Windows option on boar
 
 - None. No work or external gate must complete first.
 - Decision Date: 2026-11-08. The owner assigned this work to the Network thermocouple acquisition milestone, GitHub milestone 2.
-- Decision Date: 2026-11-11. The owner chose to document that the `Filter` record has no effect on Linux and to name the filter control of the TC-32, instead of averaging in the driver or connecting the record to the device settings of other boards. No document defines an averaging for the Windows option, the only filter of the TC-32 is its rejection frequency, which the diagnostics records already set, and the other boards cannot be checked without the USB board of row G1.
+- Decision Date: 2026-11-11. The owner chose to document that the `Filter` record has no effect on Linux and to name the filter control of the TC-32, instead of averaging in the driver or connecting the record to the device settings of other boards. No document defines an averaging for the Windows option, the only filter of the TC-32 is its rejection frequency, which the diagnostics records already set, and the site has no USB board, so the other boards are not examined.
 
 ##### Implementation Plan
 
@@ -476,7 +477,7 @@ Superseded Plan Artifacts: the plan of 2026-11-08 to average successive readings
 - Limit: `sphinx-build` is not installed on the host, so the changed documentation cannot be rendered here.
 - Landed: observed 2026-11-11T16:15:34Z after `git fetch`, `origin/site` is at commit a9d1fe05a056f4ecfec0740449ec7c8b15aad06a, the same commit as the local `HEAD`, and the two paths changed by the implementation commit 4b6e49a (`docs/source/measCompMultiFunctionDoc.rst`, `measCompApp/src/drvMultiFunction.cpp`) show no difference between `HEAD` and `origin/site`. Recheck with `git diff 4b6e49a origin/site -- <path>`.
 - Issue: the owner delegated the issue operations on 2026-11-11; the title was narrowed to the documentation of the filter record, the body was rewritten for the implemented change and its three acceptance criteria were checked, a closing comment was posted and issue #15 was closed as completed at 2026-11-11T16:15:24Z. The read-back shows state CLOSED, reason COMPLETED, label bug and milestone 2.
-- Remaining behavior: the driver does not average readings and does not connect the record to the device settings of other boards; what the Windows option does on them is not established and needs the USB board of row G1.
+- Remaining behavior: the driver does not average readings and does not connect the record to the device settings of other boards; what the Windows option does on them is not established, because the site has no USB board.
 
 ##### GitHub Projection
 
@@ -494,209 +495,11 @@ Last Compared: 2026-11-11T16:15:34Z; remote updated at 2026-11-11T16:15:24Z
 
 | ID | Work unit | Type | Status | Ready | Deps | Done when / Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| M6 | USB counter poller exit race | Carry-forward | Open | No |  | `drvUSBCTR.cpp` stops its poller before the process exits, as the multifunction driver does; priority and scope are undecided; [detail](#m6---usb-counter-poller-exit-race) |
-| M7 | Generator transport-error handling | Carry-forward | Blocked | No | G1 | A transport error in a generator write disconnects the port and the first error code is kept; the network temperature devices are unchanged; [detail](#m7---generator-transport-error-handling) |
-| M8 | Open-detect result on input type change | Carry-forward | Blocked | No | G1 | A connection error from the open-detect call in the input-type branch disconnects the port; [detail](#m8---open-detect-result-on-input-type-change) |
-| M9 | Persistent errors of the other poll-loop reads | Carry-forward | Open | No |  | The digital input, counter, analog input and scan status reads report a persistent error once per change as the temperature read does, or the owner records that they need not; priority and fixture are undecided; [detail](#m9---persistent-errors-of-the-other-poll-loop-reads) |
+| M9 | Persistent errors of the other poll-loop reads | Carry-forward | Open | No |  | The two analog input reads report a persistent error once per change as the temperature read does, or the owner records that they need not; the digital input, counter and scan status reads already report once per outage; the priority is low and the fixture is undecided; [detail](#m9---persistent-errors-of-the-other-poll-loop-reads) |
 | M10 | E-TC array read | Carry-forward | Open | No |  | The E-TC reads its channels with one request per poll and exposes its cold-junction temperatures, calibration table and calibration dates, verified with an E-TC protocol fixture; priority and fixture scope are undecided; [detail](#m10---e-tc-array-read) |
-| M11 | Mixed value at a state change of the averaging temperature record | Carry-forward | Open | No |  | The default temperature template publishes one value that mixes the old and the new state at each open-detection or scale change, and the site template does not; whether and how to change the default template is undecided; [detail](#m11---mixed-value-at-a-state-change-of-the-averaging-temperature-record) |
-| G1 | USB board for hardware verification | External gate | Open | No |  | A USB board that exercises M7 or M8 is available and its model is recorded; [detail](#g1---usb-board-for-hardware-verification) |
+| M11 | Mixed value at a state change of the averaging temperature record | Carry-forward | Not started | Yes |  | The user documentation states that the default temperature template publishes one value that mixes the old and the new state at each open-detection or scale change, and which settings avoid it; the default template is unchanged; [detail](#m11---mixed-value-at-a-state-change-of-the-averaging-temperature-record) |
 
 ### Backlog Details
-
-#### M6 - USB Counter Poller Exit Race
-
-Origin: 9c39e49 / M6
-Identity History: none
-GitHub Issue: none
-Status: Open
-
-##### Summary
-
-`measCompApp/src/drvUSBCTR.cpp` starts a `USBCTRPoller` thread with `epicsThreadCreate()` and its loop runs in `while(1)` with no stop condition and no join, the pattern that makes a two-port multifunction IOC abort while exiting when the vendor library deletes its devices during `exit()`. The same exit race is therefore likely, but it was not reproduced: the file includes `drvMca.h` from the separate `mca` module, which is absent from the available build environment, so it could not be compiled or run here.
-
-##### Scope
-
-Decide whether the USB counter driver gets the same stop and join exit handler, and how it is built and verified without the missing module.
-
-Out of scope: the multifunction driver, which is fixed separately, and Windows.
-
-##### Completion Criteria
-
-- The owner decides the priority and the verification environment, and the row is then moved to Not started, Deferred or retired with a dated decision.
-
-##### Dependencies And Decisions
-
-- None recorded. Verification needs a build environment that provides the `mca` module headers.
-
-##### Implementation Plan
-
-Plan Status: draft
-Plan Acceptance: none
-Implementation Authorization: none
-Superseded Plan Artifacts: none
-
-1. Reproduce the exit abort on a build that includes the `mca` module, then apply the stop and join exit handler and rerun the same loop.
-
-##### Test Plan
-
-| Label | Layer | Method | Environment | Expected Result |
-| --- | --- | --- | --- | --- |
-| T1 | Integration | A counted loop of normal exits of an IOC that configures the USB counter driver. | An environment that provides the `mca` module and a counter device or protocol fixture | Every exit has status 0 and no sanitizer report; the unchanged driver aborts in some exits. |
-
-##### Verification Results
-
-| Label | Observed At | Environment | Result | Evidence |
-| --- | --- | --- | --- | --- |
-| T1 | Not run | Environment with the `mca` module | Pending | none |
-
-##### Closure Evidence
-
-- Observed 2026-11-07 while reviewing the multifunction exit fix: `drvUSBCTR.cpp` lines 434 and 1499 show the thread creation and the unconditional loop. The build verification of this file was declined on 2026-11-06 and is recorded in `docs/CLOSED_DOORS.md`; this row concerns the exit pattern, not that build verification.
-
-##### GitHub Projection
-
-Title: none
-Labels: none
-GitHub Milestone: none
-Observed State: none
-Observed Labels: none
-Observed Milestone: none
-Last Compared: never
-
-#### M7 - Generator Transport Error Handling
-
-Origin: 9c39e49 / M7
-Identity History: none
-GitHub Issue: [#9](https://github.com/jeonghanlee/measComp/issues/9)
-Status: Blocked (prior status: Not started)
-
-##### Summary
-
-`writeFloat64()` restarts a running pulse generator or waveform generator with vendor calls and returns `asynError` on a failure without disconnecting the port, unlike `writeInt32()` and `writeUInt32Digital()`. The stop and restart pairs at five sites accumulate their status with a bitwise OR, and 12 of the 21 pairs of different connection-error codes combine into a code that `isConnectionError()` rejects. Found by reading the code on 2026-11-07 and not reproduced. The paths run on the USB boards with a pulse generator (USB-1608G, USB-1608HS-2AO, USB-1808) or an analog output scan, and the digitizer restart also on the network E-1608; the network temperature devices TC32 and E-TC reach none of them.
-
-##### Scope
-
-Add the connection-error disconnect to `writeFloat64()` and keep the first non-zero error code at the five OR sites.
-
-Out of scope: the pulse generator running state in `disconnect()`, whose handling depends on how the vendor library leaves a running timer after a transport loss, the reconnection policy, discovery and the poller.
-
-##### Completion Criteria
-
-- A transport error from a generator stop or restart in `writeFloat64()` disconnects the port and marks the inputs disconnected.
-- Different connection-error codes from the stop and the restart still disconnect the port at all five sites.
-- The shipped cases, including the network temperature device cases, pass unchanged.
-- A hardware check on a USB board with a pulse generator or waveform generator records the disconnect, with the board model and library version.
-- The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
-
-##### Dependencies And Decisions
-
-- G1: the hardware check needs a USB board; the regression checks do not.
-- Decision Date: 2026-11-08. The owner decided to fix both this item and M8 and to keep them in the Backlog for now; the USB board is not known to exist.
-
-##### Implementation Plan
-
-Plan Status: draft
-Plan Acceptance: none
-Implementation Authorization: none
-Superseded Plan Artifacts: none
-
-1. In `measCompApp/src/drvMultiFunction.cpp`, replace the OR accumulation at the five sites by a first-error accumulation and add the `isConnectionError()` and `disconnect()` step to `writeFloat64()` after the vendor mutex is released. Verified by T1 and T2.
-
-##### Test Plan
-
-| Label | Layer | Method | Environment | Expected Result |
-| --- | --- | --- | --- | --- |
-| T1 | Regression | Run every case of `tests/test_reconnect.pl` and the exit loop with the README commands, and the Perl checks and the compile of the changed C++ files in the Rocky 8 image with the commands of the README section "Static checks"; the cases that use the TC32 and E-TC protocol fixtures are the guard for the network temperature devices. | Common integration environment; Rocky 8 image | All pass with normal IOC exit; the changed files compile on Rocky 8. |
-| T2 | Hardware | Unplug a USB board with a pulse generator or waveform generator while a generator parameter changes and read the port state and log. | A USB board that has the feature (G1) | The port is disconnected and the inputs are marked disconnected. |
-
-##### Verification Results
-
-| Label | Observed At | Environment | Result | Evidence |
-| --- | --- | --- | --- | --- |
-| T1 | Not run | Common integration environment | Pending | none |
-| T2 | Not run | USB board (G1) | Pending | none |
-
-##### Closure Evidence
-
-- Found 2026-11-07 during a coherence review of the completed work units, confirmed by reading the code and by computing the error-code combinations from `uldaq.h`; not reproduced. No plan is accepted yet.
-
-##### GitHub Projection
-
-Title: Disconnect on transport errors when generator settings change and keep the first error code
-Labels: bug
-GitHub Milestone: none
-Observed State: open
-Observed Labels: bug
-Observed Milestone: none
-Last Compared: 2026-11-08T02:31:58Z; remote updated at 2026-11-08T02:31:48Z
-
-#### M8 - Open Detect Result On Input Type Change
-
-Origin: 9c39e49 / M8
-Identity History: none
-GitHub Issue: [#10](https://github.com/jeonghanlee/measComp/issues/10)
-Status: Blocked (prior status: Not started)
-
-##### Summary
-
-When the analog input type changes to thermocouple, `writeInt32()` calls `setOpenThermocoupleDetect()` and drops its return value, while the other callers keep it, so a transport error in that call leaves the port connected and the write reporting success. The call is from the original upstream code and its siblings were changed when the thermocouple settings were made consistent after a reconnect. Found by reading the code on 2026-11-07 and not reproduced. The branch runs only on the USB-2408-2AO, the one board with a configurable input type; the network temperature devices TC32 and E-TC never run it.
-
-##### Scope
-
-Store the result of the open-detect call in the status that the end of `writeInt32()` classifies, keeping the first non-zero error code.
-
-Out of scope: other boards, the restore of the thermocouple settings after a reconnect and the reconnection policy.
-
-##### Completion Criteria
-
-- A connection error from the open-detect call in the input-type branch disconnects the port and `writeInt32()` returns `asynError`.
-- A non-transport error from that call returns `asynError` without disconnecting a healthy device.
-- The shipped cases, including the network temperature device cases, pass unchanged.
-- A hardware check on a USB-2408-2AO records the disconnect when the board is unplugged during the input type switch, with the board model and library version.
-- The linked issue is observed closed, or Closure Evidence records a dated exception limited to issue closure.
-
-##### Dependencies And Decisions
-
-- G1: the hardware check needs a USB-2408-2AO; the regression checks do not.
-- Decision Date: 2026-11-08. The owner decided to fix both this item and M7 and to keep them in the Backlog for now; the USB board is not known to exist.
-
-##### Implementation Plan
-
-Plan Status: draft
-Plan Acceptance: none
-Implementation Authorization: none
-Superseded Plan Artifacts: none
-
-1. In `measCompApp/src/drvMultiFunction.cpp`, assign the result of the open-detect call in the input-type branch of `writeInt32()` to the status, keeping the first non-zero error code. Verified by T1 and T2.
-
-##### Test Plan
-
-| Label | Layer | Method | Environment | Expected Result |
-| --- | --- | --- | --- | --- |
-| T1 | Regression | Run every case of `tests/test_reconnect.pl` and the exit loop with the README commands, and the Perl checks and the compile of the changed C++ files in the Rocky 8 image with the commands of the README section "Static checks"; the cases that use the TC32 and E-TC protocol fixtures are the guard for the network temperature devices. | Common integration environment; Rocky 8 image | All pass with normal IOC exit; the changed file compiles on Rocky 8. |
-| T2 | Hardware | Unplug a USB-2408-2AO while the input type switches from voltage to thermocouple and read the port state and log. | A USB-2408-2AO (G1) | The port is disconnected and the write returns `asynError`. |
-
-##### Verification Results
-
-| Label | Observed At | Environment | Result | Evidence |
-| --- | --- | --- | --- | --- |
-| T1 | Not run | Common integration environment | Pending | none |
-| T2 | Not run | USB-2408-2AO (G1) | Pending | none |
-
-##### Closure Evidence
-
-- Found 2026-11-07 during a coherence review of the completed work units, confirmed by reading the code and the commit history of the call sites; not reproduced. No plan is accepted yet.
-
-##### GitHub Projection
-
-Title: Check the open thermocouple detection result when the analog input type changes
-Labels: bug
-GitHub Milestone: none
-Observed State: open
-Observed Labels: bug
-Observed Milestone: none
-Last Compared: 2026-11-08T02:31:58Z; remote updated at 2026-11-08T02:31:50Z
 
 #### M9 - Persistent Errors Of The Other Poll-Loop Reads
 
@@ -707,11 +510,11 @@ Status: Open
 
 ##### Summary
 
-The poll loop of `MultiFunction::pollerThread()` calls `reportError()` on every poll for each failing read, not only for the temperature read: `DIn`, `CIn`, `AIn` and the two scan status calls print the same error line on every poll while an error persists (`drvMultiFunction.cpp`, read 2026-11-08). The temperature read is changed under M2; the others were not reproduced, because the TC32 fixture has no condition for them.
+The poll loop of `MultiFunction::pollerThread()` reports a failing read through `reportError()`. The `DIn`, `CIn` and the two scan status reads report only when the previous poll had no error (`if (!prevStatus)`), so they print one line for each outage; the two `AIn` reads call `reportError()` on every poll while a non-connection error persists (`drvMultiFunction.cpp`, read 2026-11-11). The temperature read is changed under M2. The error of an `AIn` read was not reproduced: the TC32 fixture has no analog input, and `tests/E1608.pm` implements the analog input command and inherits the fault injection of `tests/TC32.pm`, but the existing case injects a single end of file on that command, so a fault that keeps failing the read has no case.
 
 ##### Scope
 
-Decide whether these reads report a persistent error once per change as M2 does, with which fixture conditions, and whether a shared helper replaces the per-read state.
+Decide whether the two `AIn` reads report a persistent error once per change as M2 does, with which fixture condition, and whether a shared helper replaces the per-read state.
 
 Out of scope: the temperature read, which M2 changes, and connection errors.
 
@@ -722,6 +525,7 @@ Out of scope: the temperature read, which M2 changes, and connection errors.
 ##### Dependencies And Decisions
 
 - Decision Date: 2026-11-08. The owner chose to register these reads here and to change only the temperature read under M2.
+- Decision Date: 2026-11-11. The owner chose to correct the premise of this row, because the other reads already report once per outage, and to narrow it to the two `AIn` reads at a low priority.
 
 ##### Implementation Plan
 
@@ -747,6 +551,7 @@ Superseded Plan Artifacts: none
 ##### Closure Evidence
 
 - Observed 2026-11-08 while reviewing the plan of M2: the call sites are `reportError()` after `DIn`, `CIn`, `AIn` and the scan status calls in the poll loop.
+- Read 2026-11-11: the `if (!prevStatus)` guards of the `DIn`, `CIn`, `AOutScanStatus` and `AInScanStatus` reports come from the upstream commit e32f3c6 of 2020-11-09, "Changes in poller to avoid error storms when device is not available", and were in the code when this row was written (commit 9c39e49); `prevStatus` holds the input status of the previous poll and is cleared when the poll returns to normal. The two `AIn` reports have no such guard. The statement of the 2026-11-08 observation, that these reads print on every poll, therefore holds only for `AIn`.
 
 ##### GitHub Projection
 
@@ -824,7 +629,7 @@ Last Compared: never
 Origin: 9c39e49 / M11
 Identity History: none
 GitHub Issue: none
-Status: Open
+Status: Not started
 
 ##### Summary
 
@@ -832,17 +637,19 @@ The shipped temperature template `measCompTemperatureIn.template` reads with `as
 
 ##### Scope
 
-Decide whether the default temperature template changes so that no mixed value is published at a state change, and if so how, or whether the behavior is documented and left; then plan the change. The record to compare is the site template used by the `tcmd` repository.
+Document in the user documentation that the default temperature record averages the samples of one scan, so the one value published at a change of the open detection or of the scale can mix the old and the new state, and name the record settings that avoid it, `DTYP` `asynFloat64` and `MDEL` -1, as the site template sets them. The default template is not changed.
 
-Out of scope: the site repository, the driver read path and the E-TC and USB boards that share the template.
+Out of scope: a change of the default of the template, the site repository, the driver read path and the E-TC and USB boards that share the template.
 
 ##### Completion Criteria
 
-- The owner decides the priority and the remedy, and the row is then moved to Not started, Deferred or retired with a dated decision.
+- The user documentation says that a value published at a change of the open detection or of the scale can mix the two states when the record averages, and names the settings that avoid it.
+- The default template is unchanged.
 
 ##### Dependencies And Decisions
 
 - Decision Date: 2026-11-10. The owner chose to register the observation as a backlog row with the priority and the remedy undecided.
+- Decision Date: 2026-11-11. The owner chose to document the behavior and leave the default template unchanged, because the site template already avoids it, the averaging is an intended default, and the mixed value appears only at the moment a setting changes.
 
 ##### Implementation Plan
 
@@ -851,24 +658,25 @@ Plan Acceptance: none
 Implementation Authorization: none
 Superseded Plan Artifacts: none
 
-1. Decide the remedy with the owner, then plan the template change and a case that changes the open detection and the scale and reads every update between.
+1. In `docs/source/measCompMultiFunctionDoc.rst`, extend the description of the `$(P)$(R)` temperature record: the default template reads with `asynFloat64Average`, so at a change of the open detection or of the scale the one value that averages samples of both states is published as valid, and a record with `DTYP` `asynFloat64` and `MDEL` -1 publishes no such value. Verified by T1.
 
 ##### Test Plan
 
 | Label | Layer | Method | Environment | Expected Result |
 | --- | --- | --- | --- | --- |
-| T1 | Integration | Change the open detection and the scale of a channel while the IOC runs and read every update of its record. | Common integration environment | No published value lies outside the old and the new reading; the template before the change publishes one. |
+| T1 | Documentation | Read the changed passage from the seat of a user who scans a TC-32 with the default template and check each statement against the template and the observations in Closure Evidence. | Repository documents in the working tree | The reader can tell when a mixed value appears and which settings avoid it, and every statement matches its source. |
 
 ##### Verification Results
 
 | Label | Observed At | Environment | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| T1 | Not run | Common integration environment | Pending | none |
+| T1 | Not run | Repository documents in the working tree | Pending | none |
 
 ##### Closure Evidence
 
 - Observed 2026-11-09 and 2026-11-10 on the real TC-32 with the measComp-repository IOC (default template, `SCAN` one second, scratch builds of 4884b71): at the open-detection write of 11:26:16 the channel published -4720.89 and, at the reattach about 3 minutes later, -8416.18, each as a valid value without alarm; the cut sensor gave -7887.71 and -8801.9 in the same way; at scale changes one update mixed the units (channel 2: 32.39 and 87.40 from Celsius to Fahrenheit and to Kelvin, 15.66 and 20.51 into and out of Volts; channel 31: 59.77, 211.48, 148.82 and 9.53). Arithmetic, not checked in the code: -4720.89 equals 9 of 19 polls at -9999 and the rest at 29.41, and -8416.18 equals 16 of 19 at -9999 and the rest at 25.70, with about 19 polls in one second.
 - Observed 2026-11-09 13:24 to 13:26 on the same device with the site IOC (`tcmd` 498510d, `asynFloat64`, `MDEL` -1) built against measComp 4884b71: the next update after each open-detection and scale change showed the new state with no intermediate value.
+- Read 2026-11-11: the `$(P)$(R)` record of `measCompTemperatureIn.template` has `DTYP` `asynFloat64Average`, and the record table of the user documentation says only that the field should be scanned periodically; the site `TC32-alsu.substitutions` of the `tcmd` repository sets `DTYP=asynFloat64` and `MDEL=-1` for every channel.
 
 ##### GitHub Projection
 
@@ -879,30 +687,6 @@ Observed State: none
 Observed Labels: none
 Observed Milestone: none
 Last Compared: never
-
-#### G1 - USB Board For Hardware Verification
-
-Origin: 9c39e49 / G1
-GitHub Issue: none
-Status: Open
-
-##### Summary
-
-M7 and M8 need a hardware check on a USB board: M7 on a board with a pulse generator (USB-1608G, USB-1608HS-2AO or USB-1808) or a waveform generator, M8 on a USB-2408-2AO. The owner has not confirmed that a USB board exists or which model it is. The responsible party is the owner; the affected work is M7 and M8. The regression checks of both do not depend on this gate.
-
-##### Completion Criteria
-
-- The owner confirms a USB board and its model, and the model is one of the boards that exercise M7 or M8, or the owner decides to waive the hardware check with a dated decision.
-
-##### Verification Results
-
-| Observed At | Result | Evidence |
-| --- | --- | --- |
-| 2026-11-08 | Pending | The owner does not know the model or whether the board exists. |
-
-##### Closure Evidence
-
-- none
 
 ## History
 
