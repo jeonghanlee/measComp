@@ -846,6 +846,61 @@ analog/temperature inputs on the USB-2408-2AO.
 
     **measCompTemperatureSetup.adl**
 
+**Network TC-32 diagnostics:** These are the records defined in measCompTemperatureCJC.template
+and measCompTemperatureBank.template. They exist only for a network TC-32 (board type ETH_TC32)
+on Linux and need ULDAQ. They are loaded from TC32Network.substitutions, which
+iocBoot/iocTC32/st.cmd loads from a commented line after TC32.substitutions; do not load it for a
+USB TC-32, whose driver rejects these settings. measCompTemperatureCJC.template is loaded once for
+each of the 32 thermocouple channels (R is Ti0 to Ti31), and measCompTemperatureBank.template is
+loaded once for the base bank (R is Bank0, address 0).
+
+.. cssclass:: table-bordered table-striped table-hover
+.. list-table::
+  :header-rows: 1
+  :widths: 10 10 10 10 60
+
+  * - EPICS record name
+    - EPICS record type
+    - asyn interface
+    - drvInfo string
+    - Description
+  * - $(P)$(R)ColdJunction
+    - ai
+    - asynFloat64
+    - COLD_JUNCTION_VALUE
+    - Cold-junction temperature of the channel in Celsius. The driver reads the 32 values of the
+      device with one request on every poll. The record is scanned I/O Intr. When the request
+      fails the record goes INVALID and the temperature records are not affected.
+  * - $(P)$(R)RejectFreq
+    - mbbo
+    - asynInt32
+    - REJECT_FREQUENCY
+    - Mains rejection frequency of the filter of the A/D converters of the base bank. Choices are
+      "60 Hz" (1) and "50 Hz" (2); any other value is rejected before the device is touched. The
+      record has no PINI, so an IOC start does not write it to the device. The driver restores the
+      last value written after a reconnect and publishes the value that the device reports after
+      each connection.
+  * - $(P)$(R)CalTable
+    - mbbo
+    - asynInt32
+    - CAL_TABLE_TYPE
+    - Calibration table in use for the base bank. Choices are "Factory" (1) and "Field" (2). It is
+      written, restored and published like the rejection frequency.
+  * - $(P)$(R)CalDateFactory
+    - stringin
+    - asynOctetRead
+    - CAL_DATE_FACTORY
+    - Factory calibration date of the base bank as local time text, read after each connection.
+      The record is scanned I/O Intr.
+  * - $(P)$(R)CalDateField
+    - stringin
+    - asynOctetRead
+    - CAL_DATE_FIELD
+    - Field calibration date of the base bank as local time text, read after each connection.
+      ULDAQ picks it at the connection from the rejection frequency that the device reports then,
+      so it can lag a setting made afterwards until the next connection. The record is scanned
+      I/O Intr.
+
 Digital I/O Functions
 ~~~~~~~~~~~~~~~~~~~~~
 
