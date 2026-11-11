@@ -12,7 +12,7 @@ Remote milestone observed at: 2026-11-11T16:15:34Z; state: open; no open issue a
 Recheck remote milestone with `gh api repos/jeonghanlee/measComp/milestones/2`.
 Baseline commit: 9c39e491e463fac77f15cfcec16aa8b4a97cbf10
 
-Next session entry point: No row of the Milestone is open and all five issues of GitHub milestone 2 (#11 to #15) are closed; the Backlog has M11 (document the mixed value of the averaging temperature record), whose draft plan the owner accepts and authorizes next; M9, narrowed to the two analog input reads at a low priority and still Open; and M10, which is Open and needs an owner decision on its priority and fixture scope before a plan of its own with an E-TC fixture can be written. The work for USB boards (the exit of the USB counter poller, the generator transport error and the open-detect result at an input type change) was taken out on 2026-11-11 because the site has no USB board; it is recorded in `docs/CLOSED_DOORS.md`, and GitHub issues #9 and #10 of the last two were closed as not planned on 2026-11-11. The fixture can use the per-channel values and the request shape that the single-request read added to `tests/TC32.pm`.
+Next session entry point: No row of the Milestone is open and all five issues of GitHub milestone 2 (#11 to #15) are closed; the Backlog has M11 (document the mixed value of the averaging temperature record), in progress since the owner accepted its plan and authorized its implementation on 2026-11-11; M9, narrowed to the two analog input reads at a low priority and still Open; and M10, which is Open and needs an owner decision on its priority and fixture scope before a plan of its own with an E-TC fixture can be written. The work for USB boards (the exit of the USB counter poller, the generator transport error and the open-detect result at an input type change) was taken out on 2026-11-11 because the site has no USB board; it is recorded in `docs/CLOSED_DOORS.md`, and GitHub issues #9 and #10 of the last two were closed as not planned on 2026-11-11. The fixture can use the per-channel values and the request shape that the single-request read added to `tests/TC32.pm`.
 
 ## Scope
 
@@ -497,7 +497,7 @@ Last Compared: 2026-11-11T16:15:34Z; remote updated at 2026-11-11T16:15:24Z
 | --- | --- | --- | --- | --- | --- | --- |
 | M9 | Persistent errors of the other poll-loop reads | Carry-forward | Open | No |  | The two analog input reads report a persistent error once per change as the temperature read does, or the owner records that they need not; the digital input, counter and scan status reads already report once per outage; the priority is low and the fixture is undecided; [detail](#m9---persistent-errors-of-the-other-poll-loop-reads) |
 | M10 | E-TC array read | Carry-forward | Open | No |  | The E-TC reads its channels with one request per poll and exposes its cold-junction temperatures, calibration table and calibration dates, verified with an E-TC protocol fixture; priority and fixture scope are undecided; [detail](#m10---e-tc-array-read) |
-| M11 | Mixed value at a state change of the averaging temperature record | Carry-forward | Not started | Yes |  | The user documentation states that the default temperature template publishes one value that mixes the old and the new state at each open-detection or scale change, and which settings avoid it; the default template is unchanged; [detail](#m11---mixed-value-at-a-state-change-of-the-averaging-temperature-record) |
+| M11 | Mixed value at a state change of the averaging temperature record | Carry-forward | In progress | No |  | The user documentation states that the default temperature template publishes one value that mixes the old and the new state at each open-detection or scale change, and which setting avoids it; the default template is unchanged; [detail](#m11---mixed-value-at-a-state-change-of-the-averaging-temperature-record) |
 
 ### Backlog Details
 
@@ -629,21 +629,21 @@ Last Compared: never
 Origin: 9c39e49 / M11
 Identity History: none
 GitHub Issue: none
-Status: Not started
+Status: In progress
 
 ##### Summary
 
-The shipped temperature template `measCompTemperatureIn.template` reads with `asynFloat64Average` and `SCAN` of one second, so one published value is the mean of the samples of one scan. At the moment the open detection or the scale of a channel changes, that mean mixes the samples of the old and the new state and is published as a valid reading. The site database, which uses `asynFloat64` and `MDEL` -1, published no such value in the same transitions. The cause is a hypothesis from arithmetic, not a code finding.
+The shipped temperature template `measCompTemperatureIn.template` reads with `asynFloat64Average` and `SCAN` of one second, so one published value is the mean of the samples of one scan. At the moment the open detection or the scale of a channel changes, that mean mixes the samples of the old and the new state and is published as a valid reading. The site database, which uses `asynFloat64` and `MDEL` -1, published no such value in the same transitions. The cause is the mean that the asyn device support `asynFloat64Average` forms from the values published since the record was last processed (read in the asyn R4-46 source on 2026-11-11); the observed values agree with it by arithmetic.
 
 ##### Scope
 
-Document in the user documentation that the default temperature record averages the samples of one scan, so the one value published at a change of the open detection or of the scale can mix the old and the new state, and name the record settings that avoid it, `DTYP` `asynFloat64` and `MDEL` -1, as the site template sets them. The default template is not changed.
+Document in the user documentation that the default temperature record averages the samples of one scan, so the one value published at a change of the open detection or of the scale can mix the old and the new state, and name the setting that avoids it, `DTYP` `asynFloat64`, which the site template sets together with `MDEL` -1. The default template is not changed.
 
 Out of scope: a change of the default of the template, the site repository, the driver read path and the E-TC and USB boards that share the template.
 
 ##### Completion Criteria
 
-- The user documentation says that a value published at a change of the open detection or of the scale can mix the two states when the record averages, and names the settings that avoid it.
+- The user documentation says that a value published at a change of the open detection or of the scale can mix the two states when the record averages, and names the setting that avoids it.
 - The default template is unchanged.
 
 ##### Dependencies And Decisions
@@ -653,29 +653,30 @@ Out of scope: a change of the default of the template, the site repository, the 
 
 ##### Implementation Plan
 
-Plan Status: draft
-Plan Acceptance: none
-Implementation Authorization: none
+Plan Status: accepted
+Plan Acceptance: 2026-11-11; accepted by the owner after the remedy was decided on the observations of the real TC-32 and the site template; no separate review pass was held before acceptance. The wording of the Scope and of plan item 1 was corrected the same day, after the asyn source showed that only `DTYP` removes the averaging; the scope of the plan did not change.
+Implementation Authorization: 2026-11-11; implement and verify the accepted plan item 1.
 Superseded Plan Artifacts: none
 
-1. In `docs/source/measCompMultiFunctionDoc.rst`, extend the description of the `$(P)$(R)` temperature record: the default template reads with `asynFloat64Average`, so at a change of the open detection or of the scale the one value that averages samples of both states is published as valid, and a record with `DTYP` `asynFloat64` and `MDEL` -1 publishes no such value. Verified by T1.
+1. In `docs/source/measCompMultiFunctionDoc.rst`, extend the description of the `$(P)$(R)` temperature record: the default template reads with `asynFloat64Average`, so at a change of the open detection or of the scale the one value that averages samples of both states is published as valid, and a record with `DTYP` `asynFloat64` reads the latest value and publishes no such value; the site sets `MDEL` -1 together with it, and the shipped template fixes `DTYP`, so a modified copy of the template is needed. Verified by T1.
 
 ##### Test Plan
 
 | Label | Layer | Method | Environment | Expected Result |
 | --- | --- | --- | --- | --- |
-| T1 | Documentation | Read the changed passage from the seat of a user who scans a TC-32 with the default template and check each statement against the template and the observations in Closure Evidence. | Repository documents in the working tree | The reader can tell when a mixed value appears and which settings avoid it, and every statement matches its source. |
+| T1 | Documentation | Read the changed passage from the seat of a user who scans a TC-32 with the default template and check each statement against the template and the observations in Closure Evidence. | Repository documents in the working tree | The reader can tell when a mixed value appears and which setting avoids it, and every statement matches its source. |
 
 ##### Verification Results
 
 | Label | Observed At | Environment | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| T1 | Not run | Repository documents in the working tree | Pending | none |
+| T1 | 2026-11-11, finished by 2026-11-11T19:14:42Z | Repository documents in the working tree | Pass: three second-person reads by delegated readers followed the changed entry of the record `$(P)$(R)` from the seats of a user who scans a TC-32 with the default template, of a user who must change the template, and of a maintainer who compares the register with the entry and the sources, and checked each statement against the template, the asyn R4-46 source (`devAsynFloat64.c`), the EPICS base source for `MDEL`, the site substitutions and the recorded observations. The first read found one minor finding (the entry did not say where the settings are made, and the shipped template fixes `DTYP` and has no `MDEL`) and the second one (the register still named `DTYP` and `MDEL` together as the avoiding settings); both were corrected, and the third found nothing above the floor. Four info items were left unchanged | Source identity: `docs/source/measCompMultiFunctionDoc.rst` SHA-256 `314a489c36c22b1c597aefcb08e1744864b7e6a3e6d17f8034a40d163b12f682` |
 
 ##### Closure Evidence
 
 - Observed 2026-11-09 and 2026-11-10 on the real TC-32 with the measComp-repository IOC (default template, `SCAN` one second, scratch builds of 4884b71): at the open-detection write of 11:26:16 the channel published -4720.89 and, at the reattach about 3 minutes later, -8416.18, each as a valid value without alarm; the cut sensor gave -7887.71 and -8801.9 in the same way; at scale changes one update mixed the units (channel 2: 32.39 and 87.40 from Celsius to Fahrenheit and to Kelvin, 15.66 and 20.51 into and out of Volts; channel 31: 59.77, 211.48, 148.82 and 9.53). Arithmetic, not checked in the code: -4720.89 equals 9 of 19 polls at -9999 and the rest at 29.41, and -8416.18 equals 16 of 19 at -9999 and the rest at 25.70, with about 19 polls in one second.
 - Observed 2026-11-09 13:24 to 13:26 on the same device with the site IOC (`tcmd` 498510d, `asynFloat64`, `MDEL` -1) built against measComp 4884b71: the next update after each open-detection and scale change showed the new state with no intermediate value.
+- Read 2026-11-11 in the asyn R4-46 source (`devAsynFloat64.c`): `interruptCallbackAverage()` adds each published value to a sum and counts it, and `processAiAverage()` takes the mean and clears both when the record is processed; plain `asynFloat64` has no accumulator and reads the current value. `MDEL` -1 only makes the record post a monitor at every processing and does not change the averaging; the observations of the site record were made with both settings together.
 - Read 2026-11-11: the `$(P)$(R)` record of `measCompTemperatureIn.template` has `DTYP` `asynFloat64Average`, and the record table of the user documentation says only that the field should be scanned periodically; the site `TC32-alsu.substitutions` of the `tcmd` repository sets `DTYP=asynFloat64` and `MDEL=-1` for every channel.
 
 ##### GitHub Projection
