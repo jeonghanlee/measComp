@@ -12,7 +12,7 @@ UDP/TCP devices are simulated; internal driver and library functions run unchang
   `IO::Select`, `Time::HiRes`, `Getopt::Long` and `Pod::Usage`. Debian's `perl`
   package includes these modules; Rocky installations also need
   `perl-JSON-PP` and `perl-Digest-SHA` when using `perl-interpreter`.
-- EPICS Base 7.0.10 and asyn 4.45, including headers, libraries and Base build tools.
+- EPICS Base 7.0.10 and asyn 4.45 or 4.46, including headers, libraries and Base build tools.
 - ULDAQ 1.2.2 built with the required TCP receive patch through
   [`uldaq-env`](https://github.com/jeonghanlee/uldaq-env), as described in the
   [Linux vendor dependency](../docs/reconnection.md#linux-vendor-dependency).
@@ -548,12 +548,13 @@ Run these from this repository root. The Perl checks cover the four Perl
 files of the test, their usage messages and the modules they load; the
 compile checks cover the C++ files that the test builds. Run the Perl checks
 on the host and, with the repository mounted read-only, in the image of the
-Rocky 8 build environment, `jeonghanlee/rocky8-epics:1.2.2` (EPICS Base
-7.0.10, asyn 4.45 and ULDAQ headers). The host commands need `podchecker`,
+Rocky 8 build environment, `jeonghanlee/rocky8-epics:1.1.0` (EPICS Base
+7.0.10, asyn 4.46 and ULDAQ headers). The host commands need `podchecker`,
 which Debian's `perl` package provides, and the Rocky 8 commands need Docker
 and that image. The last two Perl commands must print `exit 2`. Every other
 command must print no error; the compile prints deprecation warnings about
-`rset`, which are expected.
+`rset` and two missing-initializer warnings about `iocshFuncDef::usage` in
+`configFuncDef` and `showDevicesFuncDef`, which are expected.
 
 ```bash
 for f in test_reconnect.pl build_reconnect.pl TC32.pm E1608.pm; do perl -I tests -wc tests/$f; podchecker tests/$f; done
@@ -565,8 +566,8 @@ env -u BASE -u ASYN -u BUILD -u ULDAQ_INCLUDE -u ULDAQ_LIB perl tests/build_reco
 ```
 
 ```bash
-docker run --rm --network none -v "$PWD":/w:ro jeonghanlee/rocky8-epics:1.2.2 bash -c 'cd /w && for f in test_reconnect.pl build_reconnect.pl TC32.pm E1608.pm; do perl -I tests -wc tests/$f; podchecker tests/$f; done'
-docker run --rm --network none -v "$PWD":/w:ro jeonghanlee/rocky8-epics:1.2.2 bash -c 'B=/opt/epics/1.2.2/rocky-8.10/7.0.10; for f in measCompApp/src/drvMultiFunction.cpp tests/reconnect_ioc.cpp; do g++ -Wall -Wextra -fsyntax-only -Wno-write-strings -Wno-unused-parameter -I$B/base/include -I$B/base/include/os/Linux -I$B/base/include/compiler/gcc -I$B/modules/asyn-4.45.0/include -I$B/vendor/include -I/w/measCompApp/src /w/$f; done'
+docker run --rm --network none -v "$PWD":/w:ro jeonghanlee/rocky8-epics:1.1.0 bash -c 'cd /w && for f in test_reconnect.pl build_reconnect.pl TC32.pm E1608.pm; do perl -I tests -wc tests/$f; podchecker tests/$f; done'
+docker run --rm --network none -v "$PWD":/w:ro jeonghanlee/rocky8-epics:1.1.0 bash -c 'B=/opt/epics/1.3.0/rocky-8.10/7.0.10; for f in measCompApp/src/drvMultiFunction.cpp tests/reconnect_ioc.cpp; do g++ -Wall -Wextra -fsyntax-only -Wno-write-strings -Wno-unused-parameter -I$B/base/include -I$B/base/include/os/Linux -I$B/base/include/compiler/gcc -I$B/modules/asyn-4.46.0/include -I$B/vendor/include -I/w/measCompApp/src /w/$f; done'
 ```
 
 ## Negative controls
