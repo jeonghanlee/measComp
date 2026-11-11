@@ -812,7 +812,14 @@ This database is loaded once for each temperature input channel.
     - asynFloat64
     - TEMPERATURE_IN_VALUE
     - Temperature input value. This field should be periodically scanned, since it is
-      not currently polled in the driver, so I/O Intr scanning cannot be used.
+      not currently polled in the driver, so I/O Intr scanning cannot be used. The default
+      template reads it with DTYP asynFloat64Average, so the value is the mean of the values
+      that the driver published since the record was last processed. When the open detection
+      or the scale of the channel changes, one published value can therefore mix readings of
+      the old and the new state and still be valid. A record with DTYP asynFloat64 reads the
+      latest value instead of the mean; the site database sets that DTYP together with
+      MDEL -1 and showed no mixed value at these changes. The shipped template fixes DTYP to
+      asynFloat64Average and does not set MDEL, so use a modified copy of the template for it.
   * - $(P)$(R)Scale
     - mbbo
     - asynInt32
